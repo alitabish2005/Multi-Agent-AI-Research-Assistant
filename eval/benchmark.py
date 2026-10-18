@@ -14,7 +14,7 @@ TEST_QUERIES = [
 
 def run_baseline_single_prompt(query: str, llm):
     """Baseline: Single-call direct LLM answer without search or multi-agent verification."""
-    prompt = f"Write an academic research report answering this query: {query}. Include citations where possible."
+    prompt = f"Write an Academic Research report answering this query: {query}. Include citations where possible."
     res = llm.invoke(prompt)
     if isinstance(res.content, list):
         text_parts = [part.get("text", "") if isinstance(part, dict) else str(part) for part in res.content]
