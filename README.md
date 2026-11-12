@@ -1,5 +1,5 @@
 # Multi-Agent Research Assistant (Agentic AI System)
-Minor Project II — Implementation
+Autonomous Agentic Architecture for Deep Academic & Technical Exploration
 
 ## Overview
 An autonomous multi-agent research assistant built using **LangGraph**, **Google Gemini**, **Tavily Web Search**, and **arXiv API**, complete with an interactive **Chainlit UI**.

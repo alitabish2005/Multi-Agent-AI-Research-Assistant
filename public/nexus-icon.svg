@@ -1,0 +1,132 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" class="nexus-logo-emblem">
+  <defs>
+    <!-- Background Ambient Glow -->
+    <radialGradient id="ambient-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.45" />
+      <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Ring 1 Gradient: Cosmic Violet to Rose -->
+    <linearGradient id="ring-grad-1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+
+    <!-- Ring 2 Gradient: Electric Cyan to Indigo -->
+    <linearGradient id="ring-grad-2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="50%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+
+    <!-- Core Nucleus Gradient -->
+    <linearGradient id="core-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="50%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- Deep Glow Filter -->
+    <filter id="nexus-filter-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.5" result="blur1" />
+      <feGaussianBlur stdDeviation="8" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="core-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2" result="glow" />
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <style>
+      @keyframes nexus-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      @keyframes nexus-spin-reverse {
+        from { transform: rotate(360deg); }
+        to { transform: rotate(0deg); }
+      }
+      @keyframes nexus-pulse {
+        0%, 100% { transform: scale(1); opacity: 0.95; }
+        50% { transform: scale(1.05); opacity: 1; }
+      }
+      .nexus-orbit-a {
+        transform-origin: 60px 60px;
+        animation: nexus-spin 26s linear infinite;
+      }
+      .nexus-orbit-b {
+        transform-origin: 60px 60px;
+        animation: nexus-spin-reverse 34s linear infinite;
+      }
+      .nexus-halo {
+        transform-origin: 60px 60px;
+        animation: nexus-pulse 4.5s ease-in-out infinite;
+      }
+    </style>
+  </defs>
+
+  <!-- Ambient Light Nebula -->
+  <circle cx="60" cy="60" r="54" fill="url(#ambient-glow)" class="nexus-halo" />
+
+  <!-- Outer Protective Precision Shield / Hexagonal Swarm Grid -->
+  <polygon points="60,12 101,36 101,84 60,108 19,84 19,36"
+           fill="none"
+           stroke="#818cf8"
+           stroke-width="0.75"
+           stroke-dasharray="3 4"
+           opacity="0.32" />
+
+  <!-- Orbit Track 1: Inclined 38 deg -->
+  <g class="nexus-orbit-a">
+    <ellipse cx="60" cy="60" rx="44" ry="20"
+             fill="none"
+             stroke="url(#ring-grad-1)"
+             stroke-width="2.2"
+             transform="rotate(-28 60 60)"
+             filter="url(#nexus-filter-glow)"
+             opacity="0.92" />
+    <circle cx="95" cy="42" r="3.5" fill="#22d3ee" filter="url(#core-glow)" />
+    <circle cx="25" cy="78" r="3" fill="#f43f5e" filter="url(#core-glow)" />
+  </g>
+
+  <!-- Orbit Track 2: Inclined Counter-Angle -->
+  <g class="nexus-orbit-b">
+    <ellipse cx="60" cy="60" rx="44" ry="20"
+             fill="none"
+             stroke="url(#ring-grad-2)"
+             stroke-width="2"
+             transform="rotate(38 60 60)"
+             filter="url(#nexus-filter-glow)"
+             opacity="0.88" />
+    <circle cx="30" cy="40" r="3.5" fill="#c084fc" filter="url(#core-glow)" />
+    <circle cx="90" cy="80" r="3" fill="#34d399" filter="url(#core-glow)" />
+  </g>
+
+  <!-- Equatorial Constellation Ring -->
+  <ellipse cx="60" cy="60" rx="38" ry="38"
+           fill="none"
+           stroke="#a5b4fc"
+           stroke-width="0.9"
+           stroke-dasharray="2 6"
+           opacity="0.4" />
+
+  <!-- Constellation Intersection Energy Beams -->
+  <line x1="60" y1="28" x2="60" y2="92" stroke="url(#ring-grad-1)" stroke-width="0.8" opacity="0.35" />
+  <line x1="28" y1="60" x2="92" y2="60" stroke="url(#ring-grad-2)" stroke-width="0.8" opacity="0.35" />
+
+  <!-- Circular Quantum Nucleus (NO Star Shapes) -->
+  <circle cx="60" cy="60" r="16" fill="url(#ambient-glow)" opacity="0.6" />
+  <circle cx="60" cy="60" r="12" stroke="url(#ring-grad-1)" stroke-width="1.5" />
+  <circle cx="60" cy="60" r="8" fill="url(#core-grad)" filter="url(#core-glow)" />
+  <circle cx="60" cy="60" r="3.5" fill="#ffffff" />
+</svg>

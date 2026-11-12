@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 class SubTask(BaseModel):
     id: str = Field(description="Unique identifier for the subtask, e.g., 'task_1'")
     topic: str = Field(description="Specific research question or angle to explore")
-    source_type: str = Field(description="Source type: 'web' or 'arxiv'")
+    source_type: str = Field(description="Source type: 'web', 'arxiv', or 'document'")
 
 class ResearchPlan(BaseModel):
     tasks: List[SubTask] = Field(description="List of 2 to 4 decomposed research subtasks")
@@ -14,7 +14,7 @@ class SourceItem(BaseModel):
     title: str
     url: str
     content: str
-    source_type: str  # 'web' or 'arxiv'
+    source_type: str  # 'web', 'arxiv', or 'document'
     relevance_score: Optional[float] = 1.0
 
 class CriticEvaluation(BaseModel):
@@ -33,3 +33,5 @@ class AgentState(TypedDict):
     retry_count: int
     final_report: str
     citations: List[Dict[str, Any]]
+    uploaded_docs: Optional[List[Dict[str, Any]]]
+    history: Optional[List[Dict[str, str]]]

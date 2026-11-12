@@ -114,16 +114,16 @@ reaction_on_message_received = false
 
 [UI]
 # Name of the assistant.
-name = "Multi-Agent Research Assistant"
+name = "NexusAI"
 
-default_theme = "light"
+default_theme = "dark"
 
 # Force a specific language for all users
 language = "en-US"
 
 layout = "wide"
 
-default_sidebar_state = "closed"
+default_sidebar_state = "open"
 
 # Chat settings display location: "message_composer" (default) or "sidebar" (header)
 chat_settings_location = "message_composer"
@@ -138,14 +138,14 @@ description = "Autonomous Academic Research Assistant powered by LangGraph, Goog
 cot = "full"
 
 # Specify a CSS file that can be used to customize the user interface.
-custom_css = "/public/custom.css"
+custom_css = "/public/custom.css?v=20261113_prev_chats_v3"
 
 # Specify additional attributes for a custom CSS file
 # custom_css_attributes = "media=\"print\""
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# custom_js = "/public/test.js"
+custom_js = "/public/custom.js?v=20261113_prev_chats_v3"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"
@@ -167,10 +167,10 @@ alert_style = "classic"
 # custom_meta_image_url = "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
 
 # Load assistant logo directly from URL.
-logo_file_url = ""
+logo_file_url = "/public/logo_dark.svg?v=5"
 
 # Load assistant avatar image directly from URL.
-default_avatar_file_url = ""
+default_avatar_file_url = "/public/nexus_avatar.svg?v=1"
 
 # Avatar size in pixels (default: 20).
 # avatar_size = 20

@@ -3,33 +3,33 @@ from langchain_core.prompts import ChatPromptTemplate
 from src.agents.llm_factory import get_llm
 from src.schemas.state import AgentState, CriticEvaluation
 
-CRITIC_PROMPT = """You are the Senior Fact-Checker & Verification Agent in an agentic research team.
-Your objective is to evaluate whether the gathered research evidence is sufficient, factually sound, and relevant to answer the user query.
+CRITIC_PROMPT = """You are the Senior Peer Reviewer, Verification Critic & Scientific Integrity Lead in an autonomous research team.
+Your objective is to critically assess whether the accumulated empirical and academic evidence is sufficiently rigorous, factually backed, and technically rich to author a publication-grade research report.
 
-User Query:
+User Research Topic:
 {query}
 
 Subtasks Planned:
 {plan}
 
-Raw Evidence Gathered:
+Raw Evidence Excerpts:
 {findings}
 
-Current Retry Count: {retry_count}
+Current Review Iteration: {retry_count}
 
-Evaluation Criteria:
-1. Coverage: Are core technical aspects, mechanisms, and real-world implications adequately backed by the sources?
-2. Quality & Factuality: Are the excerpts substantive, authoritative, and consistent, or are they mere surface-level noise or error messages?
-3. Termination Guard: If retry_count >= 2, mark is_sufficient = True to prevent infinite loops, unless absolutely zero usable evidence was found.
-
-Decision:
-- If evidence has major gaps or misses critical angles, set is_sufficient = False, explain the precise missing gap in 'critique', and formulate 1-2 targeted 'refinement_queries'.
-- Otherwise, set is_sufficient = True with constructive synthesis guidance.
+Rigorous Evaluation Protocol:
+1. Depth & Grounding: Does the evidence provide concrete architectural mechanics, mathematical formulas, and quantitative benchmark statistics, or is it merely superficial prose?
+2. Diagram & Architectural Modeling Feasibility: Is the evidence detailed enough to construct an accurate architectural workflow or pipeline diagram (e.g. system modules, computational data flows, kernel stages, state transitions)?
+3. Multi-Perspective Balance: Does the evidence address both the celebrated breakthroughs AND the empirical trade-offs, compute costs, failure modes, and hardware bottlenecks?
+4. Source Authenticity: Are there valid academic pre-prints (arXiv), verified documentation, or authoritative technical disclosures present?
+5. Termination Logic:
+   - If retry_count == 0 AND evidence lacks critical comparative metrics or technical mechanics, mark `is_sufficient = False` and provide 1-2 laser-targeted `refinement_queries` specifically searching for the missing quantitative metrics or algorithms.
+   - If retry_count >= 1 OR if at least 2 substantive, informative sources are verified, mark `is_sufficient = True` and synthesize actionable, constructive guidance for the Synthesis Writer, specifying the core architectural pipeline and subsystems to illustrate in the mandatory Mermaid diagram.
 """
 
 def critic_node(state: AgentState) -> Dict[str, Any]:
-    """Critic Agent: Evaluates factual completeness, filters valid evidence, and controls re-search loops."""
-    llm = get_llm(temperature=0.1)
+    """Critic Agent: Verifies factual soundness, enforces rigor, and guides synthesis."""
+    llm = get_llm(temperature=0.0)
     structured_llm = llm.with_structured_output(CriticEvaluation)
     
     prompt = ChatPromptTemplate.from_template(CRITIC_PROMPT)
@@ -47,7 +47,7 @@ def critic_node(state: AgentState) -> Dict[str, Any]:
     ]
     
     findings_str = "\n".join([
-        f"- [{item.get('source_type', 'web').upper()}] {item.get('title')}: {item.get('content')[:350]}..."
+        f"- [{item.get('source_type', 'web').upper()}] {item.get('title')}: {item.get('content')[:400]}..."
         for item in valid_findings
     ])
     
@@ -58,7 +58,6 @@ def critic_node(state: AgentState) -> Dict[str, Any]:
         "retry_count": retry_count
     })
     
-    # Store verified findings when sufficient, or pass accumulated valid findings
     return {
         "critic_evaluation": evaluation.model_dump(),
         "verified_findings": valid_findings if valid_findings else raw_findings,

@@ -1,60 +1,167 @@
 import os
+import uuid
 import tempfile
-from typing import List
+from typing import List, Dict, Any
 import chainlit as cl
+from chainlit.server import app as fastapi_app
+from fastapi import UploadFile, File
+from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
+from langgraph.checkpoint.memory import MemorySaver
 from src.graph import create_research_graph
 from src.utils.exporter import export_report_to_pdf
+from src.utils.document_loader import load_uploaded_documents
 
 load_dotenv()
 
-# Precompile the LangGraph workflow
+# Initialize LangGraph for fully autonomous, uninterrupted multi-agent research
 research_graph = create_research_graph()
 
-@cl.set_starters
-async def set_starters() -> List[cl.Starter]:
-    """Provides modern, clickable research topic cards on the landing screen."""
-    return [
-        cl.Starter(
-            label="⚡ FlashAttention-3 Architecture",
-            message="Explain FlashAttention-3 architectural improvements, hardware asynchrony, and FP8 acceleration.",
-        ),
-        cl.Starter(
-            label="🧠 Test-Time Compute Scaling",
-            message="What are the trade-offs of Test-Time Compute vs Pre-training scaling in Large Language Models?",
-        ),
-        cl.Starter(
-            label="🧬 CRISPR-Cas9 Prime Editing",
-            message="Recent breakthroughs in CRISPR-Cas9 prime editing mechanisms and clinical delivery systems.",
-        ),
-        cl.Starter(
-            label="🤖 Humanoid VLA Policies",
-            message="State of the art in end-to-end vision-language-action policies for humanoid robotics.",
+# ─────────────────── Voice Assistant Speech-to-Text Fallback ───────────────────
+@fastapi_app.post("/api/voice/transcribe")
+async def transcribe_voice(file: UploadFile = File(...)):
+    """Transcribes user voice queries via Google Gemini as an accurate speech-to-text fallback."""
+    try:
+        import re
+        audio_bytes = await file.read()
+        if not audio_bytes or len(audio_bytes) < 300:
+            return JSONResponse({"text": "", "error": "Audio clip too short or empty", "success": False}, status_code=400)
+            
+        import google.genai as genai
+        from google.genai import types
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            return JSONResponse({"text": "", "error": "Gemini API key not configured", "success": False}, status_code=500)
+            
+        client = genai.Client(api_key=api_key)
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        
+        mime_type = file.content_type or "audio/webm"
+        if ";" in mime_type:
+            mime_type = mime_type.split(";")[0].strip()
+            
+        prompt = (
+            "You are an expert speech recognition model. Transcribe the spoken audio query verbatim into clean, accurate English text.\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "1. Output ONLY the exact transcribed speech without any quotes, explanations, or metadata.\n"
+            "2. If the audio is silent, inaudible, or contains only background noise, breathing, static, or hum, return EXACTLY empty string: \"\"\n"
+            "3. DO NOT return '<noise>', '[noise]', '<silence>', or any sound event labels.\n"
+            "4. Transcribe accurately even if the user speaks with an accent or conversational cadence."
         )
-    ]
+
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                prompt
+            ]
+        )
+        raw_text = response.text.strip() if response.text else ""
+        
+        # Clean noise or sound event labels
+        clean_text = raw_text.strip()
+        clean_text = re.sub(r"^[<\[(]?(?:noise|silence|music|inaudible|whispering|laughter|sigh)[>\])]?", "", clean_text, flags=re.IGNORECASE).strip()
+        clean_text = clean_text.strip("\"'").strip()
+        
+        # Check against common noise artifacts
+        if clean_text.lower() in ("<noise>", "[noise]", "(noise)", "noise", "<silence>", "silence", "inaudible", "none"):
+            clean_text = ""
+            
+        return JSONResponse({"text": clean_text, "success": True})
+    except Exception as e:
+        print(f"[Voice STT Error]: {e}")
+        return JSONResponse({"text": "", "error": str(e), "success": False}, status_code=500)
+
+@fastapi_app.get("/public/custom.js")
+async def get_custom_js():
+    """Serves the latest voice assistant JavaScript with strict anti-caching headers."""
+    js_path = os.path.join(os.path.dirname(__file__), "public", "custom.js")
+    if os.path.exists(js_path):
+        with open(js_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(
+            content=content,
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+    return Response(status_code=404)
+
+
+@fastapi_app.get("/public/custom.css")
+async def get_custom_css():
+    """Serves the latest CSS with strict anti-caching headers."""
+    css_path = os.path.join(os.path.dirname(__file__), "public", "custom.css")
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(
+            content=content,
+            media_type="text/css",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+    return Response(status_code=404)
+
 
 @cl.on_chat_start
 async def on_chat_start():
-    welcome_banner = (
-        "### 🔬 Multi-Agent Autonomous Research Assistant\n"
-        "*Minor Project II — Powered by LangGraph, Google Gemini, arXiv & Tavily*\n\n"
-        "<div style='display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;'>"
-        "<span style='background: rgba(139, 92, 246, 0.15); color: #8b5cf6; padding: 4px 10px; border-radius: 9999px; font-size: 0.82rem; font-weight: 600;'>🧠 Intent Triage</span>"
-        "<span style='background: rgba(6, 182, 212, 0.15); color: #06b6d4; padding: 4px 10px; border-radius: 9999px; font-size: 0.82rem; font-weight: 600;'>🧭 Lead Planner</span>"
-        "<span style='background: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 0.82rem; font-weight: 600;'>🔎 Parallel Researcher</span>"
-        "<span style='background: rgba(245, 158, 11, 0.15); color: #f59e0b; padding: 4px 10px; border-radius: 9999px; font-size: 0.82rem; font-weight: 600;'>⚖️ Verification Critic</span>"
-        "<span style='background: rgba(244, 63, 94, 0.15); color: #f43f5e; padding: 4px 10px; border-radius: 9999px; font-size: 0.82rem; font-weight: 600;'>✍️ Synthesis Writer</span>"
-        "</div>\n\n"
-        "Ask any complex technical question to initiate autonomous multi-source research, or select one of the prompt starters below."
-    )
-    await cl.Message(content=welcome_banner).send()
+    cl.user_session.set("history", [])
+    cl.user_session.set("thread_id", str(uuid.uuid4()))
+
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    user_query = message.content.strip()
-    await execute_workflow(user_query)
+    user_query = message.content.strip() if message.content else ""
+    uploaded_docs = []
+    
+    if message.elements:
+        file_paths = []
+        for el in message.elements:
+            if hasattr(el, "path") and el.path and os.path.exists(el.path):
+                file_paths.append(el.path)
+            elif hasattr(el, "content") and el.content:
+                try:
+                    temp_dir = tempfile.gettempdir()
+                    fname = getattr(el, "name", "uploaded_document")
+                    temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex[:8]}_{fname}")
+                    content = el.content
+                    if isinstance(content, str):
+                        with open(temp_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                    elif isinstance(content, bytes):
+                        with open(temp_path, "wb") as f:
+                            f.write(content)
+                    file_paths.append(temp_path)
+                except Exception as ex:
+                    print(f"Error persisting uploaded file in memory to disk: {ex}")
+                    
+        if file_paths:
+            uploaded_docs = load_uploaded_documents(file_paths)
+            
+    if uploaded_docs:
+        doc_names = list({d.get("title", "").split("(")[0].replace("📙", "").replace("📄", "").replace("📘", "").replace("📗", "").strip() for d in uploaded_docs if d.get("title")})
+        doc_list_str = ", ".join(doc_names) if doc_names else "attached file"
+        
+        # If user didn't enter a query, or entered generic text like 'explain this to me'
+        generic_prompts = {"", "explain this to me", "explain this", "what is this", "summarize this", "analyze this", "explain", "analyze", "break this down", "help me understand this", "tell me about this"}
+        if not user_query or user_query.lower().strip() in generic_prompts:
+            user_query = f"Provide a comprehensive technical analysis, architectural breakdown, and in-depth explanation of the uploaded document ({doc_list_str})"
+        
+    await execute_workflow(user_query, uploaded_docs=uploaded_docs)
 
-async def execute_workflow(user_query: str):
+async def execute_workflow(user_query: str, uploaded_docs: List[dict] = None):
+    uploaded_docs = uploaded_docs or []
+    history = cl.user_session.get("history") or []
+    run_thread_id = str(uuid.uuid4())
+    config = {"configurable": {"thread_id": run_thread_id}}
+    
     initial_state = {
         "query": user_query,
         "intent": "research",
@@ -65,31 +172,30 @@ async def execute_workflow(user_query: str):
         "critic_evaluation": None,
         "retry_count": 0,
         "final_report": "",
-        "citations": []
+        "citations": [],
+        "uploaded_docs": uploaded_docs,
+        "history": history
     }
     
-    current_state = initial_state
+    current_state = dict(initial_state)
+    root_step = None
     
-    # Real-time multi-agent execution visualizer
-    async with cl.Step(name="🚀 Autonomous Multi-Agent System") as root_step:
-        for event in research_graph.stream(initial_state):
+    try:
+        async for event in research_graph.astream(initial_state):
             for node_name, node_output in event.items():
-                current_state.update(node_output)
+                if isinstance(node_output, dict):
+                    current_state.update(node_output)
                 
                 if node_name == "router":
                     intent = current_state.get("intent", "research")
                     reasoning = current_state.get("intent_reasoning", "")
                     
-                    if intent in ("conversational", "direct_qa"):
-                        root_step.name = "💬 Conversational Response"
-                        async with cl.Step(name="🧠 Intent Triage: Direct Conversation", parent_id=root_step.id) as step:
-                            step.output = (
-                                f"**Classification:** `{intent.upper()}`\n\n"
-                                f"**Analysis:** {reasoning}"
-                            )
-                    else:
+                    if intent == "research":
+                        root_step = cl.Step(name="🚀 Autonomous Multi-Agent Swarm")
+                        await root_step.send()
+                        
+                        scoped = current_state.get("query", user_query)
                         async with cl.Step(name="🧠 0. Intent Triage & Scoping Agent", parent_id=root_step.id) as step:
-                            scoped = current_state.get("query", user_query)
                             step.output = (
                                 f"**Status:** ✅ Confirmed Research Topic\n\n"
                                 f"**Analysis:** {reasoning}\n\n"
@@ -97,28 +203,35 @@ async def execute_workflow(user_query: str):
                             )
 
                 elif node_name == "planner":
-                    async with cl.Step(name="🧭 1. Orchestrator / Planner Agent", parent_id=root_step.id) as step:
+                    parent_id = root_step.id if root_step else None
+                    async with cl.Step(name="🧭 1. Orchestrator / Planner Agent", parent_id=parent_id) as step:
                         tasks = current_state.get("plan", [])
                         plan_md = "\n".join([
                             f"- **`[{t.get('source_type', 'web').upper()}]`** {t.get('topic')}"
                             for t in tasks
                         ])
                         step.output = f"Decomposed inquiry into **{len(tasks)} targeted investigation tracks**:\n\n{plan_md}"
-                
+
                 elif node_name == "researcher":
-                    async with cl.Step(name="🔎 2. Parallel Researcher Agent", parent_id=root_step.id) as step:
+                    parent_id = root_step.id if root_step else None
+                    async with cl.Step(name="🔎 2. Parallel Researcher Agent", parent_id=parent_id) as step:
                         findings = current_state.get("raw_findings", [])
+                        doc_count = sum(1 for f in findings if f.get('source_type') == 'document')
                         arxiv_count = sum(1 for f in findings if f.get('source_type') == 'arxiv')
                         web_count = sum(1 for f in findings if f.get('source_type') == 'web')
-                        step.output = (
-                            f"Concurrently queried academic and live web repositories:\n\n"
-                            f"- 📄 **arXiv Pre-prints:** `{arxiv_count}` papers retrieved\n"
-                            f"- 🌐 **Tavily Live Web:** `{web_count}` sources retrieved\n"
-                            f"- 📊 **Total Evidence Pool:** `{len(findings)}` citations collected"
-                        )
+                        
+                        output_lines = ["Concurrently queried local documents, academic papers, and live web:"]
+                        if doc_count > 0:
+                            output_lines.append(f"- 📂 **Local Documents:** `{doc_count}` sections indexed")
+                        output_lines.append(f"- 📄 **arXiv Pre-prints:** `{arxiv_count}` papers retrieved")
+                        output_lines.append(f"- 🌐 **Live Web & Encyclopedia:** `{web_count}` sources retrieved")
+                        output_lines.append(f"- 📊 **Total Evidence Pool:** `{len(findings)}` citations collected")
+                        
+                        step.output = "\n".join(output_lines)
                 
                 elif node_name == "critic":
-                    async with cl.Step(name="⚖️ 3. Verification & Critic Agent", parent_id=root_step.id) as step:
+                    parent_id = root_step.id if root_step else None
+                    async with cl.Step(name="⚖️ 3. Verification & Critic Agent", parent_id=parent_id) as step:
                         critique = current_state.get("critic_evaluation", {})
                         passed = critique.get("is_sufficient", True)
                         status_badge = (
@@ -135,33 +248,38 @@ async def execute_workflow(user_query: str):
                         step.output = out_text
                 
                 elif node_name == "synthesis":
-                    async with cl.Step(name="✍️ 4. Synthesis & Technical Writer Agent", parent_id=root_step.id) as step:
+                    parent_id = root_step.id if root_step else None
+                    async with cl.Step(name="✍️ 4. Synthesis & Technical Writer Agent", parent_id=parent_id) as step:
                         step.output = "Authored publication-grade academic report with numbered citations and comprehensive bibliography."
 
-    intent = current_state.get("intent", "research")
-    final_report = current_state.get("final_report", "Research completed, but response was empty.")
-    
-    # Casual small talk or direct QA doesn't need bibliography or PDF export
-    if intent in ("conversational", "direct_qa"):
-        await cl.Message(content=final_report).send()
+        if root_step:
+            root_step.output = "✅ Multi-agent research pipeline completed successfully."
+            await root_step.update()
+
+        intent = current_state.get("intent", "research")
+        
+        # If conversational / direct QA / follow-up, answer directly without research report
+        if intent in ("conversational", "direct_qa", "follow_up"):
+            reply_text = current_state.get("final_report", "Response ready.")
+            await cl.Message(content=reply_text).send()
+            
+            history.append({"role": "user", "content": user_query})
+            history.append({"role": "assistant", "content": reply_text})
+            cl.user_session.set("history", history)
+            return
+
+    except Exception as e:
+        await cl.Message(
+            content=f"⚠️ **Processing Notice:** An error or service interruption occurred: `{e}`. Please try your prompt again."
+        ).send()
         return
 
-    # Append formatted traceable bibliography
-    citations = current_state.get("citations", [])
-    if citations:
-        sources_md = "\n\n---\n### 📚 Traceable Sources & References\n"
-        for c in citations:
-            url = c['url']
-            title = c['title']
-            stype = c['source_type'].upper()
-            sources_md += f"- **[{c['index']}]** [{title}]({url}) `({stype})`\n"
-        final_report += sources_md
-
-    # Generate PDF export
+    # ───────────────── PDF Generation & Final Attachments ─────────────────
+    final_report = current_state.get("final_report", "Research completed.")
     elements = []
     try:
         temp_dir = tempfile.gettempdir()
-        safe_name = "".join(x for x in user_query[:30] if x.isalnum() or x in " _-").strip()
+        safe_name = "".join(x for x in user_query[:30] if x.isalnum() or x in " _-").strip() or "Research"
         pdf_path = os.path.join(temp_dir, f"Research_Report_{safe_name}.pdf")
         export_report_to_pdf(final_report, pdf_path)
         elements.append(
@@ -174,4 +292,18 @@ async def execute_workflow(user_query: str):
     except Exception as e:
         print(f"Error creating PDF: {e}")
 
-    await cl.Message(content=final_report, elements=elements).send()
+    # If message was already token-streamed live, send the downloadable PDF file attachment
+    streamed_msg = current_state.get("_streamed_msg")
+    if streamed_msg:
+        if elements:
+            await cl.Message(
+                content="📥 **Download Publication Report (PDF):**",
+                elements=elements
+            ).send()
+    else:
+        await cl.Message(content=final_report, elements=elements).send()
+
+    # Update conversation history for conversational follow-ups
+    history.append({"role": "user", "content": user_query})
+    history.append({"role": "assistant", "content": final_report[:1200]})
+    cl.user_session.set("history", history)

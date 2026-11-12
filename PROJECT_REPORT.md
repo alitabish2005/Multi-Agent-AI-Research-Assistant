@@ -1,5 +1,5 @@
-# Final Project Report: Multi-Agent Research Assistant (Agentic AI System)
-**Academic Course:** Minor Project II  
+# Technical Report: Multi-Agent Research Assistant (Agentic AI System)
+**System Specification & Architecture**  
 **Technology Stack:** LangGraph, Google Gemini (`gemini-3.8-flash`), Tavily AI Web Search API, arXiv Pre-print API, Chainlit, ReportLab  
 
 ---
