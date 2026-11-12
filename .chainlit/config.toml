@@ -138,14 +138,14 @@ description = "Autonomous Academic Research Assistant powered by LangGraph, Goog
 cot = "full"
 
 # Specify a CSS file that can be used to customize the user interface.
-custom_css = "/public/custom.css?v=20261113_prev_chats_v3"
+custom_css = "/public/custom.css?v=20261113_smooth_layout_v11"
 
 # Specify additional attributes for a custom CSS file
 # custom_css_attributes = "media=\"print\""
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-custom_js = "/public/custom.js?v=20261113_prev_chats_v3"
+custom_js = "/public/custom.js?v=20261113_smooth_layout_v11"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"

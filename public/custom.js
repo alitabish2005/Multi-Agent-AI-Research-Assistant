@@ -67,7 +67,7 @@
   }
 
   // Force-update a React controlled input
-  function updateInputValue(el, value) {
+  function updateInputValue(el, value, skipExternalBroadcast = false) {
     if (!el) return;
     const proto = Object.getPrototypeOf(el);
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
@@ -81,6 +81,13 @@
     }
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    if (!skipExternalBroadcast) {
+      try {
+        window.dispatchEvent(
+          new CustomEvent("nexus:external-input", { detail: { value: String(value || "") } })
+        );
+      } catch (e) {}
+    }
   }
 
   // Find composer, input, submit button
@@ -96,11 +103,117 @@
 
     const submitBtn =
       document.getElementById("chat-submit") ||
-      document.getElementById("stop-button") ||
-      (composer ? composer.querySelector("#chat-submit, #stop-button, button[id*='submit'], button[type='submit']") : null);
+      document.getElementById("submit-button") ||
+      (composer
+        ? composer.querySelector(
+            "#chat-submit, button[id*='submit'], button[data-testid*='submit'], button[type='submit']"
+          )
+        : null);
 
     return { composer, input, submitBtn };
   }
+
+  // Smooth Search Transition Choreography
+  function triggerSmoothSearchTransition(rawQuery = "") {
+    try {
+      document.body.classList.add("nx-search-transitioning", "nx-chat-active");
+
+      // Mount or restart sleek top progress bar
+      let bar = document.getElementById("nx-search-transition-bar");
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "nx-search-transition-bar";
+        document.body.appendChild(bar);
+      }
+      bar.classList.remove("is-active");
+      void bar.offsetWidth;
+      bar.classList.add("is-active");
+
+      // Smooth fade-and-lift on welcome hero if present
+      const welcome = document.getElementById("welcome-screen") || document.querySelector(".welcome-screen");
+      if (welcome) {
+        welcome.classList.add("nx-welcome-exiting");
+      }
+
+      // Smoothly glide composer dock into view
+      const { composer } = getComposerElements();
+      if (composer) {
+        composer.classList.add("nx-composer-dock-enter");
+        setTimeout(() => composer.classList.remove("nx-composer-dock-enter"), 650);
+      }
+
+      setTimeout(() => {
+        document.body.classList.remove("nx-search-transitioning");
+        if (bar) bar.classList.remove("is-active");
+      }, 1400);
+    } catch (e) {}
+  }
+
+  window.__triggerSearchTransition = triggerSmoothSearchTransition;
+
+  // Submit any prompt reliably through Chainlit's native composer
+  function submitChainlitPrompt(rawQuery, source = "text") {
+    const query = String(rawQuery || "").trim();
+    if (!query) return false;
+
+    const { composer, input, submitBtn } = getComposerElements();
+    if (!input) return false;
+
+    try {
+      if (typeof clearRestoredChatView === "function") clearRestoredChatView();
+      triggerSmoothSearchTransition(query);
+      if (typeof HistoryManager !== "undefined" && HistoryManager.addSearch) {
+        HistoryManager.addSearch(query, source);
+        HistoryManager.addOrUpdateChat(query, "", "in_progress");
+      }
+    } catch (e) {}
+
+    if (composer) {
+      composer.style.visibility = "visible";
+      composer.style.display = "";
+      composer.style.opacity = "1";
+      composer.style.pointerEvents = "auto";
+      composer.style.position = "";
+      composer.style.bottom = "";
+      composer.style.left = "";
+    }
+
+    updateInputValue(input, query, true);
+    input.focus();
+
+    const tryClickSubmit = (attempt = 0) => {
+      const { input: curInput, submitBtn: curBtn } = getComposerElements();
+      if (curBtn && !curBtn.disabled) {
+        curBtn.click();
+        return;
+      }
+      if (attempt < 6) {
+        setTimeout(() => tryClickSubmit(attempt + 1), 45);
+      } else if (curInput) {
+        curInput.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            code: "Enter",
+            keyCode: 13,
+            which: 13,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      }
+    };
+
+    setTimeout(() => tryClickSubmit(0), 35);
+    return true;
+  }
+
+  window.__submitChainlitPrompt = submitChainlitPrompt;
+  window.__syncChainlitInput = function (val) {
+    const { input } = getComposerElements();
+    if (input) {
+      updateInputValue(input, val, true);
+    }
+  };
 
   // UI Icons
   const MIC_ICON_SVG = `
@@ -629,13 +742,26 @@
       });
       const data = await resp.json();
       const cleanText = data && data.text ? data.text.trim() : "";
+      const finalSpeech = !isNoiseText(cleanText)
+        ? cleanText
+        : !isNoiseText(accumulatedTranscript)
+        ? accumulatedTranscript
+        : "";
 
-      if (!isNoiseText(cleanText)) {
-        const { input, submitBtn } = getComposerElements();
-        const fullText = accumulatedTranscript
-          ? accumulatedTranscript + " " + cleanText
-          : cleanText;
-        updateInputValue(input, fullText);
+      if (finalSpeech) {
+        const { input } = getComposerElements();
+        const fullText =
+          accumulatedTranscript &&
+          finalSpeech !== accumulatedTranscript &&
+          !finalSpeech.toLowerCase().includes(accumulatedTranscript.toLowerCase())
+            ? accumulatedTranscript + " " + finalSpeech
+            : finalSpeech;
+        if (input) updateInputValue(input, fullText);
+        try {
+          window.dispatchEvent(
+            new CustomEvent("nexus:external-input", { detail: { value: fullText } })
+          );
+        } catch (e) {}
         updateBannerPreview(fullText, "");
         if (statusPill) statusPill.className = "va-status-pill va-success";
         if (statusBadge) statusBadge.textContent = "READY";
@@ -648,19 +774,8 @@
 
         if (shouldSubmit && fullText.trim().length > 0) {
           setTimeout(() => {
-            if (submitBtn && !submitBtn.disabled) {
-              submitBtn.click();
-            } else if (input) {
-              input.dispatchEvent(
-                new KeyboardEvent("keydown", {
-                  key: "Enter",
-                  code: "Enter",
-                  keyCode: 13,
-                  bubbles: true,
-                })
-              );
-            }
-          }, 700);
+            submitChainlitPrompt(fullText, "voice");
+          }, 550);
         }
       } else {
         if (statusPill) statusPill.className = "va-status-pill va-error";
@@ -675,6 +790,15 @@
       }
     } catch (fetchErr) {
       console.error("[Voice Assistant] Gemini STT error:", fetchErr);
+      if (!isNoiseText(accumulatedTranscript)) {
+        const { input } = getComposerElements();
+        if (input) updateInputValue(input, accumulatedTranscript);
+        hideVoiceModal();
+        if (shouldSubmit) {
+          setTimeout(() => submitChainlitPrompt(accumulatedTranscript, "voice"), 400);
+        }
+        return;
+      }
       if (statusPill) statusPill.className = "va-status-pill va-error";
       if (statusBadge) statusBadge.textContent = "ERROR";
       if (statusText) statusText.textContent = "Transcription service unavailable. Please try again.";
@@ -691,6 +815,7 @@
       startVoiceRecognition();
     }
   }
+  window.__toggleVoiceAssistant = toggleVoiceAssistant;
 
   // Text-To-Speech: Read aloud assistant responses
   function readAloud(text, buttonEl) {
@@ -1036,7 +1161,10 @@
     const badge = document.getElementById("history-drawer-counter");
     if (badge) badge.textContent = String(searches + chats);
     const headerCounter = document.getElementById("header-history-counter");
-    if (headerCounter) headerCounter.textContent = String(chats);
+    if (headerCounter) {
+      headerCounter.textContent = String(chats);
+      headerCounter.style.display = chats > 0 ? "inline-flex" : "none";
+    }
     try { renderActiveSidebarFeed(); } catch (e) {}
   }
 
@@ -1121,13 +1249,13 @@
           </div>
           <div class="restored-chat-banner-actions">
             <button type="button" class="restored-chat-action-btn" id="restored-chat-continue-btn" title="Re-run or continue this topic in live chat">
-              🔄 Continue / Re-run
+              Continue / Re-run
             </button>
             <button type="button" class="restored-chat-action-btn" id="restored-chat-copy-btn" title="Copy full response">
-              📋 Copy
+              Copy
             </button>
             <button type="button" class="restored-chat-action-btn restored-chat-primary-btn" id="restored-chat-back-btn" title="Return to active chat">
-              ✨ Back to Live Chat
+              Back to Live Chat
             </button>
           </div>
         </div>
@@ -1159,8 +1287,8 @@
       const btn = e.currentTarget;
       const textToCopy = `# ${chat.query}\n\n${chat.fullReport || chat.preview || ""}`;
       navigator.clipboard.writeText(textToCopy).then(() => {
-        btn.textContent = "✓ Copied!";
-        setTimeout(() => { btn.textContent = "📋 Copy"; }, 1800);
+        btn.textContent = "Copied";
+        setTimeout(() => { btn.textContent = "Copy"; }, 1800);
       });
     });
 
@@ -1194,11 +1322,9 @@
       dropdown = document.createElement("div");
       dropdown.id = "search-history-dropdown";
       dropdown.style.display = "none";
-      const { composer } = getComposerElements();
-      if (composer) {
-        composer.style.position = "relative";
-        composer.appendChild(dropdown);
-      }
+      document.body.appendChild(dropdown);
+    } else if (dropdown.parentElement !== document.body) {
+      document.body.appendChild(dropdown);
     }
 
     if (!backdrop) {
@@ -1224,10 +1350,28 @@
       return;
     }
 
+    // Position dropdown neatly above the active searchbar (AnimatedAIChat or native composer)
+    const animatedCard = document.querySelector("#animated-ai-chat-mount textarea")?.closest(".backdrop-blur-2xl");
+    const { composer } = getComposerElements();
+    const anchor = animatedCard || composer;
+    if (anchor) {
+      const rect = anchor.getBoundingClientRect();
+      const width = Math.min(640, Math.max(320, rect.width));
+      const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left));
+      const bottom = Math.max(16, window.innerHeight - rect.top + 10);
+      dropdown.style.position = "fixed";
+      dropdown.style.left = `${Math.round(left)}px`;
+      dropdown.style.bottom = `${Math.round(bottom)}px`;
+      dropdown.style.width = `${Math.round(width)}px`;
+      dropdown.style.right = "auto";
+      dropdown.style.zIndex = "9995";
+    }
+
     renderQuickSearchDropdown(dropdown);
     dropdown.style.display = "flex";
     if (backdrop) backdrop.style.display = "block";
   }
+  window.__toggleQuickSearchDropdown = toggleQuickSearchDropdown;
 
   function renderQuickSearchDropdown(dropdown) {
     const chats = HistoryManager.getChats().slice(0, 6);
@@ -1418,7 +1562,7 @@
   }
 
   function applySearchToInput(query, autoSubmit = false, triggerEl = null) {
-    const { input, submitBtn, composer } = getComposerElements();
+    const { input, composer } = getComposerElements();
     if (!input) return;
 
     if (triggerEl) {
@@ -1427,30 +1571,26 @@
     }
 
     updateInputValue(input, query);
-    input.focus();
+    const animatedTextarea = document.querySelector("#animated-ai-chat-mount textarea");
+    if (animatedTextarea) {
+      animatedTextarea.focus();
+    } else {
+      input.focus();
+    }
 
     // Visual pulse transition effect on search bar
-    const targetEl = composer || input;
-    targetEl.classList.remove("input-pulse-glow");
-    void targetEl.offsetWidth;
-    targetEl.classList.add("input-pulse-glow");
-    setTimeout(() => targetEl.classList.remove("input-pulse-glow"), 850);
+    const targetEl = animatedTextarea?.closest(".backdrop-blur-2xl") || composer || input;
+    if (targetEl) {
+      targetEl.classList.remove("input-pulse-glow");
+      void targetEl.offsetWidth;
+      targetEl.classList.add("input-pulse-glow");
+      setTimeout(() => targetEl.classList.remove("input-pulse-glow"), 850);
+    }
 
     if (autoSubmit) {
       setTimeout(() => {
-        if (submitBtn && !submitBtn.disabled) {
-          submitBtn.click();
-        } else {
-          input.dispatchEvent(
-            new KeyboardEvent("keydown", {
-              key: "Enter",
-              code: "Enter",
-              keyCode: 13,
-              bubbles: true
-            })
-          );
-        }
-      }, 200);
+        submitChainlitPrompt(query, "history");
+      }, 150);
     }
   }
 
@@ -1619,22 +1759,34 @@
       });
     }
 
-    if (document.getElementById("header-toggle-history-sidebar")) return;
+    const existingBtn = document.getElementById("header-toggle-history-sidebar");
+    if (existingBtn) {
+      const counter = document.getElementById("header-history-counter");
+      const count = HistoryManager.getChats().length;
+      if (counter) {
+        counter.textContent = String(count);
+        counter.style.display = count > 0 ? "inline-flex" : "none";
+      }
+      return;
+    }
+
     const header =
       document.getElementById("header") ||
       document.querySelector("header") ||
       document.querySelector("nav");
     if (!header) return;
 
+    const count = HistoryManager.getChats().length;
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.id = "header-toggle-history-sidebar";
-    toggleBtn.title = "Toggle Previous Chats Sidebar (Cmd+H)";
+    toggleBtn.title = "Toggle Chat History (Cmd+H)";
+    toggleBtn.setAttribute("aria-label", "Toggle Chat History");
     toggleBtn.innerHTML = `
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
-      <span>Previous Chats</span>
-      <span id="header-history-counter" style="background:#6366f1;color:#fff;font-size:10px;padding:1px 6px;border-radius:999px;font-weight:700;">
-        ${HistoryManager.getChats().length}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5" ry="2.5"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+      <span>History</span>
+      <span id="header-history-counter" class="header-history-counter" style="display: ${count > 0 ? "inline-flex" : "none"};">
+        ${count}
       </span>
     `;
 
@@ -1649,27 +1801,19 @@
       header.querySelector(".flex.items-center") ||
       header.firstElementChild;
     if (leftContainer) {
-      leftContainer.appendChild(toggleBtn);
+      if (newChatBtn && leftContainer.contains(newChatBtn)) {
+        leftContainer.insertBefore(toggleBtn, newChatBtn);
+      } else {
+        leftContainer.appendChild(toggleBtn);
+      }
     } else {
       header.insertBefore(toggleBtn, header.firstChild);
     }
   }
 
   function ensureSidebarOpenTab() {
-    if (document.getElementById("sidebar-dock-tab-btn")) return;
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.id = "sidebar-dock-tab-btn";
-    tab.title = "Open Previous Chats (Cmd+H)";
-    tab.innerHTML = `
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
-      <span>Previous Chats</span>
-    `;
-    tab.addEventListener("click", (e) => {
-      e.preventDefault();
-      toggleActiveSidebar(true);
-    });
-    (document.body || document.documentElement).appendChild(tab);
+    const staleTab = document.getElementById("sidebar-dock-tab-btn");
+    if (staleTab) staleTab.remove();
   }
 
   function renderActiveSidebarFeed() {
@@ -1873,9 +2017,9 @@
         return;
       }
 
-      container.innerHTML = searches.map((item) => {
+      container.innerHTML = searches.map((item, index) => {
         let badgeClass = "history-badge-text";
-        let badgeLabel = "⌨️ Text";
+        let badgeLabel = "Text";
         if (item.source === "voice") {
           badgeClass = "history-badge-voice";
           badgeLabel = "Voice";
@@ -2174,6 +2318,7 @@
       btn.addEventListener("click", () => {
         clearRestoredChatView();
         const text = btn.dataset.message || btn.getAttribute("data-message") || btn.innerText?.trim() || "";
+        triggerSmoothSearchTransition(text);
         if (text) {
           HistoryManager.addSearch(text, "starter");
           HistoryManager.addOrUpdateChat(text, "", "in_progress");
@@ -2189,6 +2334,7 @@
         if (e.key === "Enter" && !e.shiftKey) {
           clearRestoredChatView();
           const val = input.value.trim();
+          triggerSmoothSearchTransition(val);
           if (val) {
             HistoryManager.addSearch(val, "text");
             HistoryManager.addOrUpdateChat(val, "", "in_progress");
@@ -2202,6 +2348,7 @@
       submitBtn.addEventListener("click", () => {
         clearRestoredChatView();
         const val = input ? input.value.trim() : "";
+        triggerSmoothSearchTransition(val);
         if (val) {
           HistoryManager.addSearch(val, "text");
           HistoryManager.addOrUpdateChat(val, "", "in_progress");
@@ -2849,7 +2996,10 @@
     if (composer) {
       const welcomeScreen = document.getElementById("welcome-screen") || document.querySelector(".welcome-screen");
       const animatedChatMount = document.getElementById("animated-ai-chat-mount");
-      if (welcomeScreen && animatedChatMount) {
+      const hasMessages =
+        document.body.classList.contains("viewing-restored-chat") ||
+        document.querySelectorAll('.step[data-step-type="user_message"], .step[data-step-type="assistant_message"], .ai-message').length > 0;
+      if (welcomeScreen && animatedChatMount && !hasMessages) {
         // Tuck native composer off-screen while AnimatedAIChat is active on welcome screen
         composer.style.opacity = "0";
         composer.style.pointerEvents = "none";
@@ -2991,45 +3141,61 @@
           startOnLoad: false,
           theme: isDark ? "dark" : "neutral",
           securityLevel: "loose",
-          flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" },
-          fontFamily: "Plus Jakarta Sans, sans-serif"
+          flowchart: { useMaxWidth: true, htmlLabels: false, curve: "basis", padding: 18 },
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
         });
 
         const { svg } = await window.mermaid.render(id, code);
-        const blockToReplace = el.closest("pre") || el;
+        const preEl = el.closest("pre") || el;
+        // Find Chainlit's outer code-block wrapper (which has the "mermaid" label & copy icon) so we replace it cleanly
+        let blockToReplace = preEl;
+        if (
+          preEl.parentElement &&
+          preEl.parentElement.tagName === "DIV" &&
+          !preEl.parentElement.classList.contains("message-content") &&
+          !preEl.parentElement.classList.contains("markdown") &&
+          preEl.parentElement.children.length <= 3
+        ) {
+          blockToReplace = preEl.parentElement;
+        }
 
         const card = document.createElement("div");
-        card.className = "mermaid-card my-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/70 shadow-sm backdrop-blur transition-all";
+        card.className = "nx-diagram-card";
         card.innerHTML = `
-          <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-200 dark:border-slate-800/80 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-            <span class="flex items-center gap-1.5">
-              <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/></svg>
-              Interactive Architecture & Workflow Diagram
+          <div class="nx-diagram-header">
+            <span class="nx-diagram-title">
+              <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/></svg>
+              <span>Architecture & Workflow Diagram</span>
             </span>
-            <button type="button" class="mermaid-toggle-src text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-mono text-[11px] px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 transition-colors">
-              Source Code
-            </button>
+            <div class="nx-diagram-actions">
+              <button type="button" class="nx-diagram-btn nx-toggle-src">Source Code</button>
+              <button type="button" class="nx-diagram-btn nx-copy-src">Copy</button>
+            </div>
           </div>
-          <div class="mermaid-svg-wrapper flex justify-center items-center overflow-x-auto py-2">
+          <div class="nx-diagram-canvas">
             ${svg}
           </div>
-          <div class="mermaid-raw-src hidden mt-3 text-xs font-mono bg-slate-900 text-slate-100 p-3 rounded-lg overflow-x-auto">
+          <div class="nx-diagram-source" style="display: none;">
             <pre>${code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
           </div>
         `;
 
-        const toggleBtn = card.querySelector(".mermaid-toggle-src");
-        const rawSrc = card.querySelector(".mermaid-raw-src");
+        const toggleBtn = card.querySelector(".nx-toggle-src");
+        const copyBtn = card.querySelector(".nx-copy-src");
+        const rawSrc = card.querySelector(".nx-diagram-source");
         if (toggleBtn && rawSrc) {
           toggleBtn.addEventListener("click", () => {
-            const isHidden = rawSrc.classList.contains("hidden");
-            if (isHidden) {
-              rawSrc.classList.remove("hidden");
-              toggleBtn.textContent = "Hide Source";
-            } else {
-              rawSrc.classList.add("hidden");
-              toggleBtn.textContent = "Source Code";
-            }
+            const isHidden = rawSrc.style.display === "none";
+            rawSrc.style.display = isHidden ? "block" : "none";
+            toggleBtn.textContent = isHidden ? "Hide Source" : "Source Code";
+          });
+        }
+        if (copyBtn) {
+          copyBtn.addEventListener("click", () => {
+            navigator.clipboard.writeText(code).then(() => {
+              copyBtn.textContent = "Copied!";
+              setTimeout(() => { copyBtn.textContent = "Copy"; }, 1800);
+            });
           });
         }
 
@@ -3053,14 +3219,14 @@
       const link = document.createElement("link");
       link.id = "animated-ai-chat-css";
       link.rel = "stylesheet";
-      link.href = "/public/multi-agent-system-ui.css?v=20261113_chat_v4";
+      link.href = "/public/multi-agent-system-ui.css?v=20261113_chat_v5";
       head.appendChild(link);
     }
 
     if (!document.getElementById("animated-ai-chat-script")) {
       const script = document.createElement("script");
       script.id = "animated-ai-chat-script";
-      script.src = "/public/animated-ai-chat.js?v=20261113_chat_v4";
+      script.src = "/public/animated-ai-chat.js?v=20261113_chat_v5";
       script.defer = true;
       head.appendChild(script);
     }
