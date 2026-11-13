@@ -156,6 +156,12 @@
     const query = String(rawQuery || "").trim();
     if (!query) return false;
 
+    window.__chainlitSubmittingUntil = Date.now() + 3000;
+    const mount = document.getElementById("animated-ai-chat-mount");
+    if (mount) {
+      mount.style.display = "none";
+    }
+
     const { composer, input, submitBtn } = getComposerElements();
     if (!input) return false;
 
@@ -478,8 +484,8 @@
 
   // Start Universal Voice Assistant
   async function startVoiceRecognition() {
-    const { composer, input } = getComposerElements();
-    if (!composer || !input) return;
+    const { input } = getComposerElements();
+    const animatedTextarea = document.querySelector("#animated-ai-chat-mount textarea");
 
     // Close any open popovers/dropdowns so UI is clean
     try {
@@ -496,7 +502,8 @@
     const transcriptHint = document.getElementById("va-transcript-hint");
     const timerEl = document.getElementById("va-timer");
 
-    accumulatedTranscript = input.value ? input.value.trim() : "";
+    const currentVal = (animatedTextarea && animatedTextarea.value) || (input && input.value) || "";
+    accumulatedTranscript = currentVal.trim();
     recordedAudioChunks = [];
     recordingSeconds = 0;
     speechDetected = false;
@@ -1210,33 +1217,78 @@
     });
   }
 
-  function restoreChatInMainView(chat) {
-    if (!chat) return;
-    activeRestoredChatId = chat.id;
+  function findMainChatColumn() {
+    const welcomeScreen =
+      document.getElementById("welcome-screen") ||
+      document.querySelector(".welcome-screen");
+    if (welcomeScreen && welcomeScreen.parentElement) {
+      return welcomeScreen.parentElement;
+    }
+    const firstStep = document.querySelector(".step");
+    if (firstStep) {
+      const col = firstStep.closest(".flex.flex-col.mx-auto.w-full.flex-grow");
+      if (col) return col;
+      if (firstStep.parentElement) return firstStep.parentElement;
+    }
+    const { composer } = getComposerElements();
+    return (
+      document.querySelector(".overflow-y-auto > .flex.flex-col.mx-auto.w-full.flex-grow") ||
+      document.querySelector(".overflow-y-auto .flex.flex-col.mx-auto.w-full") ||
+      composer?.parentElement?.parentElement ||
+      document.querySelector("main") ||
+      document.getElementById("root") ||
+      document.body
+    );
+  }
+
+  function restoreChatInMainView(chatInput) {
+    if (!chatInput) return;
+
+    // Sync any live DOM messages into HistoryManager before restoring
+    try { observeAssistantResponsesForHistory(true); } catch (e) {}
+
+    const freshChat =
+      HistoryManager.getChats().find((c) => c.id === chatInput.id) ||
+      HistoryManager.getChats().find(
+        (c) => (c.query || "").toLowerCase() === (chatInput.query || "").toLowerCase()
+      ) ||
+      chatInput;
+
+    activeRestoredChatId = freshChat.id;
     toggleQuickSearchDropdown(true);
 
     let stage = document.getElementById("restored-chat-stage");
     if (!stage) {
       stage = document.createElement("div");
       stage.id = "restored-chat-stage";
-      const { composer } = getComposerElements();
-      const scrollContainer =
-        composer?.parentElement?.parentElement ||
-        document.querySelector("main") ||
-        document.getElementById("root") ||
-        document.body;
-      if (composer && composer.parentElement) {
-        composer.parentElement.insertBefore(stage, composer);
-      } else {
-        scrollContainer.appendChild(stage);
-      }
+    }
+
+    const mainColumn = findMainChatColumn();
+    if (mainColumn && (stage.parentElement !== mainColumn || mainColumn.firstElementChild !== stage)) {
+      mainColumn.insertBefore(stage, mainColumn.firstChild);
     }
 
     document.body.classList.add("viewing-restored-chat");
 
-    const bodyContentHtml = chat.fullHtml
-      ? chat.fullHtml
-      : formatMarkdownLite(chat.fullReport || chat.preview || "");
+    const hasSavedAnswer = Boolean(
+      (freshChat.fullHtml && freshChat.fullHtml.trim()) ||
+      (freshChat.fullReport && freshChat.fullReport.trim())
+    );
+
+    const bodyContentHtml = freshChat.fullHtml
+      ? freshChat.fullHtml
+      : hasSavedAnswer
+      ? formatMarkdownLite(freshChat.fullReport)
+      : `
+        <div style="padding: 18px 20px; border-radius: 14px; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(129, 140, 248, 0.25);">
+          <p style="margin: 0 0 10px 0; font-family: var(--font-sans); font-size: 0.95rem;">
+            This session was saved before the final synthesis completed. Click below to run or resume this inquiry now:
+          </p>
+          <button type="button" class="restored-chat-action-btn restored-chat-primary-btn" id="restored-chat-run-now-btn" style="padding: 8px 16px !important; font-size: 0.85rem !important;">
+            Run "${escapeHtml(freshChat.query)}" Now
+          </button>
+        </div>
+      `;
 
     stage.innerHTML = `
       <div class="restored-chat-inner">
@@ -1245,7 +1297,7 @@
             <span class="restored-chat-dot"></span>
             <span>Previous Chat Session</span>
             <span style="opacity:0.5;">•</span>
-            <span style="color:#94a3b8;font-weight:500;">${formatTimeAgo(chat.updatedAt || chat.timestamp)}</span>
+            <span style="color:#94a3b8;font-weight:500;">${formatTimeAgo(freshChat.updatedAt || freshChat.timestamp)}</span>
           </div>
           <div class="restored-chat-banner-actions">
             <button type="button" class="restored-chat-action-btn" id="restored-chat-continue-btn" title="Re-run or continue this topic in live chat">
@@ -1262,7 +1314,7 @@
 
         <div class="restored-chat-messages">
           <div class="restored-user-row">
-            <div class="restored-user-bubble">${escapeHtml(chat.query)}</div>
+            <div class="restored-user-bubble">${escapeHtml(freshChat.query)}</div>
           </div>
           <div class="restored-assistant-row">
             <div class="restored-assistant-content message-content">
@@ -1277,15 +1329,17 @@
       clearRestoredChatView();
     });
 
-    stage.querySelector("#restored-chat-continue-btn")?.addEventListener("click", () => {
-      const q = chat.query;
+    const rerunHandler = () => {
+      const q = freshChat.query;
       clearRestoredChatView();
       applySearchToInput(q, true);
-    });
+    };
+    stage.querySelector("#restored-chat-continue-btn")?.addEventListener("click", rerunHandler);
+    stage.querySelector("#restored-chat-run-now-btn")?.addEventListener("click", rerunHandler);
 
     stage.querySelector("#restored-chat-copy-btn")?.addEventListener("click", (e) => {
       const btn = e.currentTarget;
-      const textToCopy = `# ${chat.query}\n\n${chat.fullReport || chat.preview || ""}`;
+      const textToCopy = `# ${freshChat.query}\n\n${freshChat.fullReport || freshChat.preview || ""}`;
       navigator.clipboard.writeText(textToCopy).then(() => {
         btn.textContent = "Copied";
         setTimeout(() => { btn.textContent = "Copy"; }, 1800);
@@ -1295,6 +1349,8 @@
     // Ensure composer is visible at the bottom so user can type anytime
     const { composer } = getComposerElements();
     if (composer) {
+      composer.style.visibility = "visible";
+      composer.style.display = "";
       composer.style.opacity = "1";
       composer.style.pointerEvents = "auto";
       composer.style.position = "";
@@ -1303,6 +1359,7 @@
     }
 
     renderActiveSidebarFeed();
+    try { renderMermaidDiagrams(); } catch (e) {}
   }
 
   // Quick Search & Chat History Dropdown (pops above input)
@@ -1762,10 +1819,15 @@
     const existingBtn = document.getElementById("header-toggle-history-sidebar");
     if (existingBtn) {
       const counter = document.getElementById("header-history-counter");
-      const count = HistoryManager.getChats().length;
+      const count = String(HistoryManager.getChats().length);
       if (counter) {
-        counter.textContent = String(count);
-        counter.style.display = count > 0 ? "inline-flex" : "none";
+        if (counter.textContent !== count) {
+          counter.textContent = count;
+        }
+        const nextDisplay = Number(count) > 0 ? "inline-flex" : "none";
+        if (counter.style.display !== nextDisplay) {
+          counter.style.display = nextDisplay;
+        }
       }
       return;
     }
@@ -1801,13 +1863,9 @@
       header.querySelector(".flex.items-center") ||
       header.firstElementChild;
     if (leftContainer) {
-      if (newChatBtn && leftContainer.contains(newChatBtn)) {
-        leftContainer.insertBefore(toggleBtn, newChatBtn);
-      } else {
-        leftContainer.appendChild(toggleBtn);
-      }
+      leftContainer.appendChild(toggleBtn);
     } else {
-      header.insertBefore(toggleBtn, header.firstChild);
+      header.appendChild(toggleBtn);
     }
   }
 
@@ -2356,74 +2414,92 @@
       });
     }
 
-    // 3. Close quick dropdown on outside click (capture phase so React/Chainlit never blocks it)
-    window.addEventListener("pointerdown", (e) => {
-      const dropdown = document.getElementById("search-history-dropdown");
-      const trigger = document.getElementById("search-history-trigger-btn");
-      if (dropdown && dropdown.style.display === "flex") {
-        if (!dropdown.contains(e.target) && !trigger?.contains(e.target)) {
+    if (!window.__historyWindowListenersHooked) {
+      window.__historyWindowListenersHooked = true;
+
+      // 3. Close quick dropdown on outside click (capture phase so React/Chainlit never blocks it)
+      window.addEventListener("pointerdown", (e) => {
+        const dropdown = document.getElementById("search-history-dropdown");
+        const trigger = document.getElementById("search-history-trigger-btn");
+        if (dropdown && dropdown.style.display === "flex") {
+          if (!dropdown.contains(e.target) && !trigger?.contains(e.target)) {
+            toggleQuickSearchDropdown(true);
+          }
+        }
+      }, true);
+
+      window.addEventListener("click", (e) => {
+        const dropdown = document.getElementById("search-history-dropdown");
+        const trigger = document.getElementById("search-history-trigger-btn");
+        if (dropdown && dropdown.style.display === "flex") {
+          if (!dropdown.contains(e.target) && !trigger?.contains(e.target)) {
+            toggleQuickSearchDropdown(true);
+          }
+        }
+      }, true);
+
+      // 4. Keyboard shortcut: Cmd+H or Ctrl+H toggles Active Chat History Sidebar, Escape closes dropdowns
+      window.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "h") {
+          e.preventDefault();
+          toggleActiveSidebar();
+        }
+        if (e.key === "Escape") {
+          const modal = document.getElementById("history-chat-modal");
+          if (modal) modal.remove();
           toggleQuickSearchDropdown(true);
         }
-      }
-    }, true);
-
-    window.addEventListener("click", (e) => {
-      const dropdown = document.getElementById("search-history-dropdown");
-      const trigger = document.getElementById("search-history-trigger-btn");
-      if (dropdown && dropdown.style.display === "flex") {
-        if (!dropdown.contains(e.target) && !trigger?.contains(e.target)) {
-          toggleQuickSearchDropdown(true);
-        }
-      }
-    }, true);
-
-    // 4. Keyboard shortcut: Cmd+H or Ctrl+H toggles Active Chat History Sidebar, Escape closes dropdowns
-    window.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "h") {
-        e.preventDefault();
-        toggleActiveSidebar();
-      }
-      if (e.key === "Escape") {
-        const modal = document.getElementById("history-chat-modal");
-        if (modal) modal.remove();
-        toggleQuickSearchDropdown(true);
-      }
-    }, true);
+      }, true);
+    }
   }
 
   // Observe assistant answers to update Chat History
-  function observeAssistantResponsesForHistory() {
-    if (document.body.classList.contains("viewing-restored-chat")) return;
+  function observeAssistantResponsesForHistory(force = false) {
+    if (!force && document.body.classList.contains("viewing-restored-chat")) return;
 
-    const userSteps = document.querySelectorAll('div[data-step-type="user_message"]');
-    const assistantSteps = document.querySelectorAll('div[data-step-type="assistant_message"]');
-    if (assistantSteps.length === 0) return;
-
-    const lastAssistant = assistantSteps[assistantSteps.length - 1];
-    const contentEl = lastAssistant.querySelector(".message-content, [class*='markdown']") || lastAssistant;
-    const text = (contentEl.innerText || "").replace(/\bRead Aloud\b|\bStop Reading\b/g, "").trim();
-    if (text.length < 15) return;
-
-    let queryText = "";
-    if (userSteps.length > 0) {
-      const lastUser = userSteps[userSteps.length - 1];
-      queryText = (lastUser.innerText || "").trim();
-    }
+    const allSteps = Array.from(
+      document.querySelectorAll('div[data-step-type="user_message"], div[data-step-type="assistant_message"]')
+    );
+    if (allSteps.length === 0) return;
 
     const chats = HistoryManager.getChats();
-    if (!queryText && chats.length > 0) {
-      queryText = chats[0].query;
+    let currentQuery = "";
+    let lastAssistantForCurrentQuery = null;
+
+    const flushTurn = (qText, assistantEl) => {
+      if (!qText || !assistantEl || isNoiseText(qText)) return;
+      const contentEl = assistantEl.querySelector(".message-content, [class*='markdown']") || assistantEl;
+      const text = (contentEl.innerText || "").replace(/\bRead Aloud\b|\bStop Reading\b/g, "").trim();
+      if (text.length < 2) return;
+
+      const clone = contentEl.cloneNode(true);
+      clone.querySelectorAll(".va-read-aloud-btn").forEach((b) => b.remove());
+      const cleanHtml = clone.innerHTML;
+
+      const existing = chats.find((c) => (c.query || "").toLowerCase() === qText.toLowerCase());
+      if (!existing || existing.fullReport !== text || !existing.fullHtml) {
+        HistoryManager.addOrUpdateChat(qText, text, "completed", cleanHtml);
+      }
+    };
+
+    for (const stepEl of allSteps) {
+      const stType = stepEl.getAttribute("data-step-type");
+      if (stType === "user_message") {
+        if (currentQuery && lastAssistantForCurrentQuery) {
+          flushTurn(currentQuery, lastAssistantForCurrentQuery);
+        }
+        currentQuery = (stepEl.innerText || "").trim();
+        lastAssistantForCurrentQuery = null;
+      } else if (stType === "assistant_message") {
+        lastAssistantForCurrentQuery = stepEl;
+      }
     }
-    if (!queryText || isNoiseText(queryText)) return;
 
-    // Clone content without the injected Read Aloud button for clean HTML storage
-    const clone = contentEl.cloneNode(true);
-    clone.querySelectorAll(".va-read-aloud-btn").forEach((b) => b.remove());
-    const cleanHtml = clone.innerHTML;
-
-    const existing = chats.find((c) => c.query.toLowerCase() === queryText.toLowerCase());
-    if (!existing || existing.fullReport !== text) {
-      HistoryManager.addOrUpdateChat(queryText, text, "completed", cleanHtml);
+    if (!currentQuery && chats.length > 0) {
+      currentQuery = chats[0].query;
+    }
+    if (currentQuery && lastAssistantForCurrentQuery) {
+      flushTurn(currentQuery, lastAssistantForCurrentQuery);
     }
   }
 
@@ -2719,38 +2795,46 @@
     return micBtn;
   }
 
-  // Bulletproof injection into search bar
+  // Bulletproof injection into search bar (isolated from React's submit/stop button container)
   function ensureVoiceButton() {
-    const { composer, submitBtn } = getComposerElements();
+    const { composer } = getComposerElements();
     if (!composer) return null;
 
     getOrCreateBanner(composer);
+
+    const legacyToolsBox = document.getElementById("nexus-composer-tools");
+    if (legacyToolsBox) {
+      legacyToolsBox.id = "nexus-toolbar-actions";
+    }
+
+    let toolsBox = document.getElementById("nexus-toolbar-actions");
+    if (!toolsBox) {
+      toolsBox = document.createElement("div");
+      toolsBox.id = "nexus-toolbar-actions";
+      toolsBox.style.cssText = "display:inline-flex;align-items:center;gap:6px;margin-left:6px;background:transparent;border:none;padding:0;box-shadow:none;";
+    }
+
+    const staleHistBtn = document.getElementById("search-history-trigger-btn");
+    if (staleHistBtn) {
+      staleHistBtn.remove();
+    }
 
     let micBtn = document.getElementById("voice-assistant-mic-btn");
     if (!micBtn) {
       micBtn = createMicButton();
     }
-
-    if (submitBtn) {
-      const parent = submitBtn.closest(".flex.items-center.gap-1") || submitBtn.parentElement;
-      if (parent) {
-        const insertionTarget = submitBtn.parentElement === parent ? submitBtn : submitBtn.parentElement;
-        if (!parent.contains(micBtn) || micBtn.nextSibling !== insertionTarget) {
-          parent.insertBefore(micBtn, insertionTarget);
-          console.log("[Voice Assistant] Mic button injected into action bar next to submit!");
-        }
-        return micBtn;
-      }
+    if (!toolsBox.contains(micBtn)) {
+      toolsBox.appendChild(micBtn);
     }
 
     const actionRow =
       composer.querySelector(".flex.items-center.justify-between") ||
-      composer.querySelector(".flex.items-center.gap-1") ||
       composer;
+    const leftGroup =
+      (actionRow !== composer && actionRow.firstElementChild) || actionRow;
 
-    if (!actionRow.contains(micBtn)) {
-      actionRow.appendChild(micBtn);
-      console.log("[Voice Assistant] Mic button appended to action row fallback.");
+    if (leftGroup && !leftGroup.contains(toolsBox)) {
+      leftGroup.appendChild(toolsBox);
     }
     return micBtn;
   }
@@ -2999,7 +3083,8 @@
       const hasMessages =
         document.body.classList.contains("viewing-restored-chat") ||
         document.querySelectorAll('.step[data-step-type="user_message"], .step[data-step-type="assistant_message"], .ai-message').length > 0;
-      if (welcomeScreen && animatedChatMount && !hasMessages) {
+      const isSubmitting = (window.__chainlitSubmittingUntil || 0) > Date.now();
+      if (welcomeScreen && animatedChatMount && !hasMessages && !isSubmitting) {
         // Tuck native composer off-screen while AnimatedAIChat is active on welcome screen
         composer.style.opacity = "0";
         composer.style.pointerEvents = "none";
@@ -3020,14 +3105,7 @@
       }
     }
 
-    const micBtn = ensureVoiceButton();
-    if (micBtn && micBtn.parentElement) {
-      let histBtn = document.getElementById("search-history-trigger-btn");
-      if (!histBtn) histBtn = createSearchHistoryButton();
-      if (!micBtn.parentElement.contains(histBtn)) {
-        micBtn.parentElement.insertBefore(histBtn, micBtn);
-      }
-    }
+    ensureVoiceButton();
 
     hookHistoryCaptures();
     observeAssistantResponsesForHistory();
@@ -3068,6 +3146,7 @@
         const isDark = document.documentElement.classList.contains("dark") || (document.body && document.body.classList.contains("dark"));
         window.mermaid.initialize({
           startOnLoad: false,
+          suppressErrorRendering: true,
           theme: isDark ? "dark" : "neutral",
           securityLevel: "loose",
           flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" },
@@ -3090,6 +3169,7 @@
           const isDark = document.documentElement.classList.contains("dark") || (document.body && document.body.classList.contains("dark"));
           window.mermaid.initialize({
             startOnLoad: false,
+            suppressErrorRendering: true,
             theme: isDark ? "dark" : "neutral",
             securityLevel: "loose",
             flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" },
@@ -3103,7 +3183,50 @@
     parentEl.appendChild(script);
   }
 
+  function cleanupMermaidErrorNodes() {
+    document
+      .querySelectorAll(
+        'body > div[id^="dmermaid-"], body > svg[id^="mermaid-"], svg[aria-roledescription="error"], svg.error-icon'
+      )
+      .forEach((node) => {
+        const wrapper = node.closest('body > div[id^="dmermaid-"]') || node;
+        wrapper.remove();
+      });
+  }
+
+  function sanitizeMermaidCode(raw) {
+    let text = String(raw || "")
+      .replace(/^```(?:mermaid)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .trim();
+
+    const lines = text.split(/\r?\n/).map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("%%")) return line;
+
+      // Quote unquoted rectangular node labels: ID[Label (with parens/colons)] -> ID["Label (with parens/colons)"]
+      let updated = line.replace(
+        /(\b[A-Za-z0-9_]+)\[\s*(?![\"\[\(\/\\])([^\]]+?)\s*\]/g,
+        (_, id, label) => `${id}["${label.replace(/"/g, "'")}"]`
+      );
+
+      // Quote unquoted edge labels containing parens/colons/brackets: -->|Label (info)| -> -->|"Label (info)"|
+      updated = updated.replace(
+        /\|([^|\n"]*[\(\)\[\]:/][^|\n"]*)\|/g,
+        (_, label) => `|"${label.replace(/"/g, "'")}"|`
+      );
+
+      return updated;
+    });
+
+    return lines.join("\n");
+  }
+
   async function renderMermaidDiagrams() {
+    cleanupMermaidErrorNodes();
+
     if (!window.mermaid) {
       loadMermaidScript(renderMermaidDiagrams);
       return;
@@ -3130,22 +3253,37 @@
     });
 
     for (const el of elements) {
-      el.dataset.mermaidProcessed = "true";
-      const code = (el.textContent || "").trim();
-      if (!code) continue;
+      const rawCode = (el.textContent || "").trim();
+      if (!rawCode) continue;
 
+      const code = sanitizeMermaidCode(rawCode);
       const id = `mermaid-render-${Date.now()}-${++mermaidCounter}`;
       try {
         const isDark = document.documentElement.classList.contains("dark") || document.body.classList.contains("dark");
         window.mermaid.initialize({
           startOnLoad: false,
+          suppressErrorRendering: true,
           theme: isDark ? "dark" : "neutral",
           securityLevel: "loose",
           flowchart: { useMaxWidth: true, htmlLabels: false, curve: "basis", padding: 18 },
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
         });
 
+        if (typeof window.mermaid.parse === "function") {
+          const valid = await window.mermaid.parse(code, { suppressErrors: true });
+          if (valid === false) {
+            cleanupMermaidErrorNodes();
+            continue;
+          }
+        }
+
+        el.dataset.mermaidProcessed = "true";
         const { svg } = await window.mermaid.render(id, code);
+        cleanupMermaidErrorNodes();
+        if (svg && (svg.includes('aria-roledescription="error"') || svg.includes("Syntax error in text"))) {
+          continue;
+        }
+
         const preEl = el.closest("pre") || el;
         // Find Chainlit's outer code-block wrapper (which has the "mermaid" label & copy icon) so we replace it cleanly
         let blockToReplace = preEl;
@@ -3176,7 +3314,7 @@
             ${svg}
           </div>
           <div class="nx-diagram-source" style="display: none;">
-            <pre>${code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
+            <pre>${rawCode.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
           </div>
         `;
 
@@ -3192,7 +3330,7 @@
         }
         if (copyBtn) {
           copyBtn.addEventListener("click", () => {
-            navigator.clipboard.writeText(code).then(() => {
+            navigator.clipboard.writeText(rawCode).then(() => {
               copyBtn.textContent = "Copied!";
               setTimeout(() => { copyBtn.textContent = "Copy"; }, 1800);
             });
@@ -3200,8 +3338,10 @@
         }
 
         blockToReplace.parentNode.insertBefore(card, blockToReplace);
+        blockToReplace.dataset.mermaidHidden = "true";
         blockToReplace.style.display = "none";
       } catch (err) {
+        cleanupMermaidErrorNodes();
         console.warn("[Mermaid] Could not render diagram:", err);
       }
     }
@@ -3219,14 +3359,14 @@
       const link = document.createElement("link");
       link.id = "animated-ai-chat-css";
       link.rel = "stylesheet";
-      link.href = "/public/multi-agent-system-ui.css?v=20261113_chat_v5";
+      link.href = "/public/multi-agent-system-ui.css?v=20261113_chat_v7";
       head.appendChild(link);
     }
 
     if (!document.getElementById("animated-ai-chat-script")) {
       const script = document.createElement("script");
       script.id = "animated-ai-chat-script";
-      script.src = "/public/animated-ai-chat.js?v=20261113_chat_v5";
+      script.src = "/public/animated-ai-chat.js?v=20261113_chat_v7";
       script.defer = true;
       head.appendChild(script);
     }
@@ -3311,26 +3451,12 @@
       }
     });
 
-    // Clean Claude Message Stream: hide deformed empty steps, switches, and orphaned avatars
+    // Guarantee all message steps and assistant responses remain visible
     document.querySelectorAll('.step, div[data-step-type]').forEach((el) => {
-      if (el.dataset.stepType === "user_message" || el.dataset.stepType === "assistant_message") return;
-      // Hide orphan switches
+      if (el.style.display === "none" && !el.dataset.mermaidHidden) {
+        el.style.display = "";
+      }
       el.querySelectorAll('button[role="switch"]').forEach(sw => sw.style.display = "none");
-      const text = (el.innerText || "").replace(/[\r\n\t\s]+/g, " ").trim();
-      if (!text || text.length === 0) {
-        el.style.display = "none";
-      }
-    });
-
-    // Suppress any assistant avatar icon containers to maintain Claude unboxed look
-    document.querySelectorAll('div[data-step-type="assistant_message"], .ai-message').forEach((msg) => {
-      const avatar = msg.querySelector('[class*="avatar"], img[alt*="logo"], svg');
-      if (avatar && avatar.closest('div') && avatar.closest('div') !== msg) {
-        const parent = avatar.closest('div');
-        if (parent.children.length === 1 && !parent.querySelector('p, h1, h2, h3, span.markdown')) {
-          parent.style.display = "none";
-        }
-      }
     });
   }
 
@@ -3345,12 +3471,18 @@
     try { loadMermaidScript(); } catch (e) {}
     try { renderMermaidDiagrams(); } catch (e) {}
 
+    let mutationScheduled = false;
     const observer = new MutationObserver(() => {
-      try { ensureWelcomeScreenBranding(); } catch (e) {}
-      try { ensureHistoryAndVoiceUI(); } catch (e) {}
-      try { enhanceAttachmentCards(); } catch (e) {}
-      try { injectReadAloudButtons(); } catch (e) {}
-      try { renderMermaidDiagrams(); } catch (e) {}
+      if (mutationScheduled) return;
+      mutationScheduled = true;
+      requestAnimationFrame(() => {
+        mutationScheduled = false;
+        try { ensureWelcomeScreenBranding(); } catch (e) {}
+        try { ensureHistoryAndVoiceUI(); } catch (e) {}
+        try { enhanceAttachmentCards(); } catch (e) {}
+        try { injectReadAloudButtons(); } catch (e) {}
+        try { renderMermaidDiagrams(); } catch (e) {}
+      });
     });
 
     if (document.body) {

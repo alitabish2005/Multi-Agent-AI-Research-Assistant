@@ -54,15 +54,21 @@ code, pre, kbd {
   color: #ffffff !important;
 }
 
-/* Claude Background: Warm Matte Obsidian (Dark) & Warm Editorial Off-White (Light) */
-body {
+/* Claude Background: Warm Matte Obsidian (Dark Default) & Warm Editorial Off-White (Light) */
+html, body {
+  background-color: #13131a !important;
+  background-image: none !important;
+  color: #ececec !important;
+}
+
+html.light, html.light body, body.light {
   background-color: #faf9f5 !important;
   background-image: none !important;
   color: #1f1e1d !important;
 }
 
 .dark body {
-  background-color: #1b1b1a !important;
+  background-color: #13131a !important;
   background-image: none !important;
   color: #ececec !important;
 }
@@ -151,7 +157,6 @@ button[data-testid="starter"] span, div[data-testid="starter-container"] button 
 /* --- Floating Message Composer (Claude Minimal Bottom Dock) --- */
 #message-composer,
 #chat-input-container,
-div[id*="composer"],
 form[data-testid="chat-input"] {
   max-width: 820px !important;
   margin: 12px auto !important;
@@ -166,11 +171,22 @@ form[data-testid="chat-input"] {
 
 .dark #message-composer,
 .dark #chat-input-container,
-.dark div[id*="composer"],
 .dark form[data-testid="chat-input"] {
   background: #262624 !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* Suppress any Mermaid error bomb SVGs attached to document.body */
+body > div[id^="dmermaid-"],
+body > svg[id^="mermaid-"],
+svg[aria-roledescription="error"],
+svg.error-icon {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
 }
 
 /* Focused input state - subtle crisp border */
@@ -2796,14 +2812,36 @@ body:has(#attach-category-popover) [data-state="delayed-open"] {
 /* ==========================================================================
    Restored Previous Chat View in Main Viewport (ChatGPT / Claude Style)
    ========================================================================== */
-body.viewing-restored-chat #welcome-screen,
-body.viewing-restored-chat .welcome-screen,
+body.viewing-restored-chat #welcome-screen > :not(#message-composer):not(#restored-chat-stage),
+body.viewing-restored-chat .welcome-screen > :not(#message-composer):not(#restored-chat-stage),
 body.viewing-restored-chat #animated-ai-chat-mount,
+body.viewing-restored-chat #starters,
+body.viewing-restored-chat #research-assistant-center-hero,
 body.viewing-restored-chat .step {
   display: none !important;
 }
 
+body.viewing-restored-chat #welcome-screen,
+body.viewing-restored-chat .welcome-screen {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-end !important;
+  flex-grow: 0 !important;
+  margin-top: auto !important;
+  padding-top: 8px !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+body.viewing-restored-chat .overflow-y-auto > .flex-shrink-0 {
+  height: 0px !important;
+  min-height: 0px !important;
+}
+
 #restored-chat-stage {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
   width: 100% !important;
   max-width: 840px !important;
   margin: 0 auto 12px auto !important;
