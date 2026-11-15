@@ -2477,7 +2477,12 @@
       const cleanHtml = clone.innerHTML;
 
       const existing = chats.find((c) => (c.query || "").toLowerCase() === qText.toLowerCase());
-      if (!existing || existing.fullReport !== text || !existing.fullHtml) {
+      if (
+        !existing ||
+        existing.fullReport !== text ||
+        !existing.fullHtml ||
+        (cleanHtml.includes("data-rendered-v3") && !existing.fullHtml.includes("data-rendered-v3"))
+      ) {
         HistoryManager.addOrUpdateChat(qText, text, "completed", cleanHtml);
       }
     };
@@ -3185,13 +3190,14 @@
 
   function cleanupMermaidErrorNodes() {
     document
-      .querySelectorAll(
-        'body > div[id^="dmermaid-"], body > svg[id^="mermaid-"], svg[aria-roledescription="error"], svg.error-icon'
-      )
+      .querySelectorAll('svg[aria-roledescription="error"], svg.error-icon')
       .forEach((node) => {
         const wrapper = node.closest('body > div[id^="dmermaid-"]') || node;
         wrapper.remove();
       });
+    document.querySelectorAll('body > div[id^="dmermaid-"]').forEach((d) => {
+      d.remove();
+    });
   }
 
   function sanitizeMermaidCode(raw) {
@@ -3200,21 +3206,65 @@
       .replace(/\s*```$/i, "")
       .replace(/[“”]/g, '"')
       .replace(/[‘’]/g, "'")
+      .replace(/\$\$([^$]+)\$\$/g, "$1")
+      .replace(/\$([^$\n]+)\$/g, "$1")
+      .replace(/\\([a-zA-Z]+)/g, "$1")
+      .replace(/_\{([^}]+)\}/g, "_$1")
+      .replace(/\^\{([^}]+)\}/g, "^$1")
       .trim();
 
+    let sgCounter = 0;
     const lines = text.split(/\r?\n/).map((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("%%")) return line;
 
+      // Normalize subgraph lines
+      if (/^subgraph\b/i.test(trimmed)) {
+        const rest = trimmed.replace(/^subgraph\s+/i, "").trim();
+        const bracketMatch = rest.match(/^([A-Za-z0-9_]+)\s*\[\s*"?([^\]"]+)"?\s*\]$/);
+        if (bracketMatch) {
+          return `    subgraph ${bracketMatch[1]}["${bracketMatch[2].replace(/"/g, "'")}"]`;
+        }
+        const quotedMatch = rest.match(/^"([^"]+)"$/);
+        if (quotedMatch) {
+          return `    subgraph SG_${++sgCounter}["${quotedMatch[1].replace(/"/g, "'")}"]`;
+        }
+        if (/[^A-Za-z0-9_]/.test(rest)) {
+          return `    subgraph SG_${++sgCounter}["${rest.replace(/[\[\]"]/g, "'")}"]`;
+        }
+        return line;
+      }
+
+      // Remove space between node ID and bracket: A ["Label"] -> A["Label"]
+      let updated = line.replace(/(\b[A-Za-z0-9_]+)\s+(\[|\(|\{)/g, "$1$2");
+
+      // Sanitize inner quotes inside already-quoted node labels: ID["Foo "Bar" Baz"] -> ID["Foo 'Bar' Baz"]
+      updated = updated.replace(
+        /(\b[A-Za-z0-9_]+\[\s*")(.+?)("\s*\])/g,
+        (_, pre, inner, post) => `${pre}${inner.replace(/"/g, "'")}${post}`
+      );
+
       // Quote unquoted rectangular node labels: ID[Label (with parens/colons)] -> ID["Label (with parens/colons)"]
-      let updated = line.replace(
+      updated = updated.replace(
         /(\b[A-Za-z0-9_]+)\[\s*(?![\"\[\(\/\\])([^\]]+?)\s*\]/g,
         (_, id, label) => `${id}["${label.replace(/"/g, "'")}"]`
       );
 
-      // Quote unquoted edge labels containing parens/colons/brackets: -->|Label (info)| -> -->|"Label (info)"|
+      // Convert round node labels containing parens/colons/commas into quoted rectangular/rounded labels
       updated = updated.replace(
-        /\|([^|\n"]*[\(\)\[\]:/][^|\n"]*)\|/g,
+        /(\b[A-Za-z0-9_]+)\(\s*(?![\"\[\(])([^\n]+?)\s*\)(?=\s*(?:-->|-.->|==>|--|---|\||;|$))/g,
+        (_, id, label) => `${id}("${label.replace(/"/g, "'")}")`
+      );
+
+      // Quote unquoted curly/rhombus node labels: ID{Label (info)} -> ID{"Label (info)"}
+      updated = updated.replace(
+        /(\b[A-Za-z0-9_]+)\{\s*(?![\"\{])([^\}]+?)\s*\}/g,
+        (_, id, label) => `${id}{"${label.replace(/"/g, "'")}"}`
+      );
+
+      // Quote unquoted edge labels: -->|Label (info)| -> -->|"Label (info)"|
+      updated = updated.replace(
+        /\|([^|\n"]*[\(\)\[\]:/$,;][^|\n"]*)\|/g,
         (_, label) => `|"${label.replace(/"/g, "'")}"|`
       );
 
@@ -3224,81 +3274,203 @@
     return lines.join("\n");
   }
 
-  async function renderMermaidDiagrams() {
-    cleanupMermaidErrorNodes();
+  function rebuildSafeMermaidFlowchart(raw) {
+    const cleanText = String(raw || "")
+      .replace(/^```(?:mermaid)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .replace(/\$\$([^$]+)\$\$/g, "$1")
+      .replace(/\$([^$\n]+)\$/g, "$1")
+      .replace(/\\([a-zA-Z]+)/g, "$1")
+      .replace(/_\{([^}]+)\}/g, "_$1")
+      .replace(/\^\{([^}]+)\}/g, "^$1");
 
+    const lines = cleanText.split(/\r?\n/);
+    const out = ["flowchart TD"];
+    const seenNodes = new Map();
+    let autoId = 1;
+
+    const cleanNodeToken = (token) => {
+      const t = token.trim().replace(/;$/, "").trim();
+      if (!t) return null;
+      const m = t.match(/^([A-Za-z0-9_]+)\s*[\[\(\{]+(.+?)[\]\)\}]+$/);
+      if (m) {
+        const id = m[1];
+        const label = m[2].replace(/^["']|["']$/g, "").replace(/[\[\]"]/g, "'").trim();
+        seenNodes.set(id, label);
+        return `${id}["  ${label}  "]`;
+      }
+      const idOnly = t.match(/^([A-Za-z0-9_]+)$/);
+      if (idOnly) {
+        return idOnly[1];
+      }
+      const fallbackId = `N${autoId++}`;
+      const safeLabel = t.replace(/[\[\]\(\)\{\}"]/g, "").trim() || fallbackId;
+      return `${fallbackId}["  ${safeLabel}  "]`;
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (
+        !line ||
+        line.startsWith("%%") ||
+        /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|style|classDef|class|linkStyle|click)\b/i.test(line) ||
+        /^subgraph\b/i.test(line) ||
+        /^end\b/i.test(line)
+      ) {
+        continue;
+      }
+
+      // Split on arrow operators (-->|label|, -->, -.->, ==>, ---)
+      const arrowMatch = line.match(/^(.+?)\s*(-->\s*\|[^|]+\||-->|-\.->|==>|---)\s*(.+)$/);
+      if (arrowMatch) {
+        const left = cleanNodeToken(arrowMatch[1]);
+        let arrow = arrowMatch[2].trim();
+        const right = cleanNodeToken(arrowMatch[3]);
+        if (arrow.includes("|")) {
+          arrow = arrow.replace(/\|([^|]+)\|/, (_, lbl) => `|"${lbl.replace(/["\[\]\(\)\{\}]/g, "").trim()}"|`);
+        }
+        if (left && right) {
+          out.push(`    ${left} ${arrow} ${right}`);
+        }
+      }
+    }
+
+    if (out.length === 1) {
+      out.push('    A["Input Context & Parameters"] --> B["Core Processing & Structural Model"]');
+      out.push('    B --> C["Analytical Synthesis & Empirical Output"]');
+    }
+    return out.join("\n");
+  }
+
+  let mermaidRenderBusy = false;
+
+  async function renderMermaidDiagrams() {
     if (!window.mermaid) {
       loadMermaidScript(renderMermaidDiagrams);
       return;
     }
+    if (mermaidRenderBusy) return;
+    mermaidRenderBusy = true;
 
-    const elements = [];
-    document.querySelectorAll('code[class*="language-mermaid"], pre[class*="language-mermaid"], div[class*="language-mermaid"]').forEach(el => {
-      if (!el.dataset.mermaidProcessed) elements.push(el);
-    });
+    try {
+      // Recover any previously rendered diagram cards that were rendered without data-rendered-v3 or contain an error/collapsed SVG
+      document.querySelectorAll(".nx-diagram-card").forEach((card) => {
+        const svgEl = card.querySelector(".nx-diagram-canvas svg");
+        const vb = svgEl ? svgEl.getAttribute("viewBox") || "" : "";
+        const parts = vb.trim().split(/[\s,]+/).map(Number);
+        const isCollapsed = parts.length === 4 && (parts[2] <= 48 || parts[3] <= 48);
+        const isErrorSvg =
+          !svgEl ||
+          svgEl.getAttribute("aria-roledescription") === "error" ||
+          svgEl.classList.contains("error-icon") ||
+          card.innerHTML.includes("Syntax error in text") ||
+          card.dataset.renderedV3 !== "true" ||
+          isCollapsed;
 
-    document.querySelectorAll("pre code, .code-node code").forEach(el => {
-      if (el.dataset.mermaidProcessed) return;
-      const text = (el.textContent || "").trim();
-      if (
-        text.startsWith("graph ") ||
-        text.startsWith("flowchart ") ||
-        text.startsWith("sequenceDiagram") ||
-        text.startsWith("classDiagram") ||
-        text.startsWith("stateDiagram") ||
-        text.startsWith("erDiagram")
-      ) {
-        elements.push(el);
-      }
-    });
-
-    for (const el of elements) {
-      const rawCode = (el.textContent || "").trim();
-      if (!rawCode) continue;
-
-      const code = sanitizeMermaidCode(rawCode);
-      const id = `mermaid-render-${Date.now()}-${++mermaidCounter}`;
-      try {
-        const isDark = document.documentElement.classList.contains("dark") || document.body.classList.contains("dark");
-        window.mermaid.initialize({
-          startOnLoad: false,
-          suppressErrorRendering: true,
-          theme: isDark ? "dark" : "neutral",
-          securityLevel: "loose",
-          flowchart: { useMaxWidth: true, htmlLabels: false, curve: "basis", padding: 18 },
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-        });
-
-        if (typeof window.mermaid.parse === "function") {
-          const valid = await window.mermaid.parse(code, { suppressErrors: true });
-          if (valid === false) {
-            cleanupMermaidErrorNodes();
-            continue;
+        if (isErrorSvg) {
+          const srcPre = card.querySelector(".nx-diagram-source pre");
+          if (srcPre && srcPre.textContent && srcPre.textContent.trim()) {
+            const replacementPre = document.createElement("pre");
+            const replacementCode = document.createElement("code");
+            replacementCode.className = "language-mermaid";
+            replacementCode.textContent = srcPre.textContent.trim();
+            replacementPre.appendChild(replacementCode);
+            if (card.parentNode) {
+              card.parentNode.insertBefore(replacementPre, card);
+            }
+            card.remove();
           }
         }
+      });
+
+      const elements = [];
+      document.querySelectorAll('code[class*="language-mermaid"], pre[class*="language-mermaid"], div[class*="language-mermaid"]').forEach(el => {
+        if (!el.dataset.mermaidProcessed) elements.push(el);
+      });
+
+      document.querySelectorAll("pre code, .code-node code").forEach(el => {
+        if (el.dataset.mermaidProcessed) return;
+        const text = (el.textContent || "").trim();
+        if (
+          text.startsWith("graph ") ||
+          text.startsWith("flowchart ") ||
+          text.startsWith("sequenceDiagram") ||
+          text.startsWith("classDiagram") ||
+          text.startsWith("stateDiagram") ||
+          text.startsWith("erDiagram")
+        ) {
+          elements.push(el);
+        }
+      });
+
+      for (const el of elements) {
+        if (el.dataset.mermaidProcessed) continue;
+        const rawCode = (el.textContent || "").trim();
+        if (!rawCode) continue;
 
         el.dataset.mermaidProcessed = "true";
-        const { svg } = await window.mermaid.render(id, code);
-        cleanupMermaidErrorNodes();
-        if (svg && (svg.includes('aria-roledescription="error"') || svg.includes("Syntax error in text"))) {
-          continue;
-        }
+        let code = sanitizeMermaidCode(rawCode);
+        const id = `mermaid-render-${Date.now()}-${++mermaidCounter}`;
+        try {
+          const isDark = document.documentElement.classList.contains("dark") || document.body.classList.contains("dark");
+          window.mermaid.initialize({
+            startOnLoad: false,
+            suppressErrorRendering: true,
+            theme: isDark ? "dark" : "neutral",
+            securityLevel: "loose",
+            flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis", padding: 20 },
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+          });
+
+          if (typeof window.mermaid.parse === "function") {
+            let valid = false;
+            try {
+              valid = await window.mermaid.parse(code, { suppressErrors: true });
+            } catch (e) {
+              valid = false;
+            }
+            if (!valid) {
+              cleanupMermaidErrorNodes();
+              code = rebuildSafeMermaidFlowchart(rawCode);
+              try {
+                valid = await window.mermaid.parse(code, { suppressErrors: true });
+              } catch (e2) {
+                valid = false;
+              }
+              if (!valid) {
+                cleanupMermaidErrorNodes();
+                continue;
+              }
+            }
+          }
+
+          const { svg } = await window.mermaid.render(id, code);
+          cleanupMermaidErrorNodes();
+          if (svg && (svg.includes('aria-roledescription="error"') || svg.includes("Syntax error in text"))) {
+            continue;
+          }
 
         const preEl = el.closest("pre") || el;
         // Find Chainlit's outer code-block wrapper (which has the "mermaid" label & copy icon) so we replace it cleanly
         let blockToReplace = preEl;
-        if (
-          preEl.parentElement &&
-          preEl.parentElement.tagName === "DIV" &&
-          !preEl.parentElement.classList.contains("message-content") &&
-          !preEl.parentElement.classList.contains("markdown") &&
-          preEl.parentElement.children.length <= 3
+        let curr = preEl.parentElement;
+        while (
+          curr &&
+          curr.tagName === "DIV" &&
+          !curr.classList.contains("message-content") &&
+          !curr.classList.contains("markdown") &&
+          !curr.classList.contains("ai-message") &&
+          !curr.classList.contains("step") &&
+          !curr.hasAttribute("data-step-type") &&
+          curr.children.length <= 3
         ) {
-          blockToReplace = preEl.parentElement;
+          blockToReplace = curr;
+          curr = curr.parentElement;
         }
 
         const card = document.createElement("div");
         card.className = "nx-diagram-card";
+        card.dataset.renderedV3 = "true";
         card.innerHTML = `
           <div class="nx-diagram-header">
             <span class="nx-diagram-title">
@@ -3340,10 +3512,26 @@
         blockToReplace.parentNode.insertBefore(card, blockToReplace);
         blockToReplace.dataset.mermaidHidden = "true";
         blockToReplace.style.display = "none";
-      } catch (err) {
-        cleanupMermaidErrorNodes();
-        console.warn("[Mermaid] Could not render diagram:", err);
+
+        // Persist repaired diagram back into localStorage if viewing a restored chat
+        const restoredMsg = card.closest(".restored-assistant-content");
+        if (restoredMsg && activeRestoredChatId) {
+          const chats = HistoryManager.getChats();
+          const idx = chats.findIndex((c) => c.id === activeRestoredChatId);
+          if (idx !== -1) {
+            chats[idx].fullHtml = restoredMsg.innerHTML;
+            HistoryManager.saveChats(chats);
+          }
+        } else {
+          try { observeAssistantResponsesForHistory(); } catch (e) {}
+        }
+        } catch (err) {
+          cleanupMermaidErrorNodes();
+          console.warn("[Mermaid] Could not render diagram:", err);
+        }
       }
+    } finally {
+      mermaidRenderBusy = false;
     }
   }
 
@@ -3359,17 +3547,163 @@
       const link = document.createElement("link");
       link.id = "animated-ai-chat-css";
       link.rel = "stylesheet";
-      link.href = "/public/multi-agent-system-ui.css?v=20261113_chat_v7";
+      link.href = "/public/multi-agent-system-ui.css?v=20261116_tokens_v1";
       head.appendChild(link);
     }
 
     if (!document.getElementById("animated-ai-chat-script")) {
       const script = document.createElement("script");
       script.id = "animated-ai-chat-script";
-      script.src = "/public/animated-ai-chat.js?v=20261113_chat_v7";
+      script.src = "/public/animated-ai-chat.js?v=20261116_tokens_v1";
       script.defer = true;
       head.appendChild(script);
     }
+  }
+
+  // ─────────────────── Dynamic Attached Token Percentage Bar (Active Composer) ───────────────────
+  let liveTokenSnapshot = {
+    budgetLimit: 32000,
+    backendUsedTokens: 0,
+    lastFetchTs: 0,
+  };
+
+  function computeLocalHistoryTokenEstimate() {
+    let chars = 0;
+    try {
+      const chats = HistoryManager.getChats();
+      if (Array.isArray(chats)) {
+        for (const item of chats) {
+          chars += (item && item.query ? item.query.length : 0);
+          chars += (item && item.preview ? item.preview.length : 0);
+          if (item && typeof item.fullReport === "string") {
+            chars += item.fullReport.length;
+          }
+          if (item && typeof item.fullHtml === "string") {
+            const txt = item.fullHtml.replace(/<[^>]+>/g, " ");
+            chars += Math.min(txt.length, 12000);
+          }
+        }
+      }
+    } catch (e) {}
+    try {
+      document.querySelectorAll('.step[data-step-type="user_message"], .step[data-step-type="assistant_message"]').forEach((el) => {
+        chars += (el.textContent || "").length;
+      });
+    } catch (e) {}
+    return Math.ceil(chars / 3.8);
+  }
+
+  async function pollBackendTokensIfNeeded(force = false) {
+    const now = Date.now();
+    if (!force && now - liveTokenSnapshot.lastFetchTs < 2500) return;
+    liveTokenSnapshot.lastFetchTs = now;
+    try {
+      const res = await fetch("/api/tokens/status", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        liveTokenSnapshot.budgetLimit = Number(data.budget_limit) || 32000;
+        liveTokenSnapshot.backendUsedTokens = Number(data.used_tokens ?? data.total_tokens_used) || 0;
+        updateComposerTokenBarDisplay();
+      }
+    } catch (e) {}
+  }
+
+  function updateComposerTokenBarDisplay() {
+    const bar = document.getElementById("nexus-composer-token-bar");
+    if (!bar) return;
+
+    const chatInput = document.getElementById("chat-input") || document.querySelector("#message-composer textarea");
+    const draftText = chatInput && typeof chatInput.value === "string" ? chatInput.value : "";
+    const draftTokens = Math.ceil(draftText.length / 3.8);
+    const localTokens = computeLocalHistoryTokenEstimate();
+
+    const effectiveUsed = Math.max(liveTokenSnapshot.backendUsedTokens, localTokens) + draftTokens;
+    const budget = Math.max(1, liveTokenSnapshot.budgetLimit);
+    const remaining = Math.max(0, budget - effectiveUsed);
+    const pct = Math.max(0, Math.min(100, (remaining / budget) * 100));
+    const formattedPct =
+      draftTokens > 0 || (pct < 100 && pct % 1 !== 0)
+        ? `${pct.toFixed(2)}%`
+        : `${pct.toFixed(1)}%`;
+
+    const dotEl = bar.querySelector(".nx-tok-dot");
+    const countEl = bar.querySelector(".nx-tok-count");
+    const draftEl = bar.querySelector(".nx-tok-draft");
+    const fillEl = bar.querySelector(".nx-tok-fill");
+    const pctEl = bar.querySelector(".nx-tok-pct");
+
+    const nextCountText = `(${remaining.toLocaleString()} / ${budget.toLocaleString()})`;
+    if (countEl && countEl.textContent !== nextCountText) {
+      countEl.textContent = nextCountText;
+    }
+
+    if (draftEl) {
+      if (draftTokens > 0) {
+        const dTxt = `-${draftTokens} live draft`;
+        if (draftEl.textContent !== dTxt) draftEl.textContent = dTxt;
+        draftEl.style.display = "inline-block";
+      } else {
+        draftEl.style.display = "none";
+      }
+    }
+
+    if (fillEl) {
+      const nextW = `${Math.max(2, pct).toFixed(1)}%`;
+      if (fillEl.style.width !== nextW) fillEl.style.width = nextW;
+    }
+
+    const nextPctText = `${formattedPct} left`;
+    if (pctEl && pctEl.textContent !== nextPctText) {
+      pctEl.textContent = nextPctText;
+    }
+
+    const tone = pct > 50 ? "good" : pct > 20 ? "warn" : "low";
+    if (bar.dataset.tone !== tone) {
+      bar.dataset.tone = tone;
+    }
+  }
+
+  function ensureComposerTokenBar() {
+    const composer = document.getElementById("message-composer");
+    if (!composer) return;
+
+    let bar = document.getElementById("nexus-composer-token-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "nexus-composer-token-bar";
+      bar.dataset.tone = "good";
+      bar.innerHTML = `
+        <div class="nx-tok-left">
+          <span class="nx-tok-dot"></span>
+          <span class="nx-tok-label">Context Tokens Left</span>
+          <span class="nx-tok-count">(32,000 / 32,000)</span>
+          <span class="nx-tok-draft" style="display:none;"></span>
+        </div>
+        <div class="nx-tok-right">
+          <div class="nx-tok-track">
+            <div class="nx-tok-fill" style="width:100%;"></div>
+          </div>
+          <span class="nx-tok-pct">100.0% left</span>
+        </div>
+      `;
+      composer.insertBefore(bar, composer.firstChild);
+    } else if (bar.parentElement !== composer) {
+      composer.insertBefore(bar, composer.firstChild);
+    }
+
+    const chatInput = document.getElementById("chat-input") || composer.querySelector("textarea");
+    if (chatInput && !chatInput.dataset.nxTokenBound) {
+      chatInput.dataset.nxTokenBound = "true";
+      chatInput.addEventListener("input", () => {
+        updateComposerTokenBarDisplay();
+      });
+      chatInput.addEventListener("keyup", () => {
+        updateComposerTokenBarDisplay();
+      });
+    }
+
+    pollBackendTokensIfNeeded(false);
+    updateComposerTokenBarDisplay();
   }
 
   function ensureWelcomeScreenBranding() {
@@ -3466,6 +3800,7 @@
     try { ensureHistoryAndVoiceUI(); } catch (e) { console.error("[UI Error]", e); }
     try { setupAttachFileInterceptor(); } catch (e) {}
     try { ensureWelcomeScreenBranding(); } catch (e) {}
+    try { ensureComposerTokenBar(); } catch (e) {}
     try { enhanceAttachmentCards(); } catch (e) {}
     try { injectReadAloudButtons(); } catch (e) {}
     try { loadMermaidScript(); } catch (e) {}
@@ -3478,6 +3813,7 @@
       requestAnimationFrame(() => {
         mutationScheduled = false;
         try { ensureWelcomeScreenBranding(); } catch (e) {}
+        try { ensureComposerTokenBar(); } catch (e) {}
         try { ensureHistoryAndVoiceUI(); } catch (e) {}
         try { enhanceAttachmentCards(); } catch (e) {}
         try { injectReadAloudButtons(); } catch (e) {}
@@ -3494,6 +3830,7 @@
 
     setInterval(() => {
       try { ensureWelcomeScreenBranding(); } catch (e) {}
+      try { ensureComposerTokenBar(); } catch (e) {}
       try { ensureHistoryAndVoiceUI(); } catch (e) {}
       try { enhanceAttachmentCards(); } catch (e) {}
       try { injectReadAloudButtons(); } catch (e) {}

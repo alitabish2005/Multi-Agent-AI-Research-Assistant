@@ -177,9 +177,125 @@ form[data-testid="chat-input"] {
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45) !important;
 }
 
-/* Suppress any Mermaid error bomb SVGs attached to document.body */
-body > div[id^="dmermaid-"],
-body > svg[id^="mermaid-"],
+/* --- Attached Dynamic Token Percentage Bar (Active Composer) --- */
+#nexus-composer-token-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin: -10px -16px 8px -16px !important;
+  padding: 6px 14px !important;
+  background: rgba(12, 14, 28, 0.85) !important;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.22) !important;
+  border-top-left-radius: 19px !important;
+  border-top-right-radius: 19px !important;
+  font-size: 11px !important;
+  user-select: none !important;
+}
+
+#nexus-composer-token-bar .nx-tok-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: #cbd5e1 !important;
+}
+
+#nexus-composer-token-bar .nx-tok-dot {
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 9999px !important;
+  background: #34d399 !important;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.8) !important;
+}
+
+#nexus-composer-token-bar[data-tone="warn"] .nx-tok-dot {
+  background: #fbbf24 !important;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.8) !important;
+}
+
+#nexus-composer-token-bar[data-tone="low"] .nx-tok-dot {
+  background: #fb7185 !important;
+  box-shadow: 0 0 8px rgba(251, 113, 133, 0.8) !important;
+}
+
+#nexus-composer-token-bar .nx-tok-label {
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  font-size: 10px !important;
+  color: #c7d2fe !important;
+}
+
+#nexus-composer-token-bar .nx-tok-count {
+  color: #94a3b8 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 10.5px !important;
+}
+
+#nexus-composer-token-bar .nx-tok-draft {
+  padding: 1px 6px !important;
+  border-radius: 4px !important;
+  background: rgba(99, 102, 241, 0.2) !important;
+  border: 1px solid rgba(129, 140, 248, 0.35) !important;
+  color: #a5b4fc !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 10px !important;
+}
+
+#nexus-composer-token-bar .nx-tok-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+#nexus-composer-token-bar .nx-tok-track {
+  width: 88px !important;
+  height: 6px !important;
+  border-radius: 9999px !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  overflow: hidden !important;
+}
+
+#nexus-composer-token-bar .nx-tok-fill {
+  height: 100% !important;
+  border-radius: 9999px !important;
+  background: linear-gradient(90deg, #34d399, #818cf8) !important;
+  transition: width 0.25s ease !important;
+}
+
+#nexus-composer-token-bar[data-tone="warn"] .nx-tok-fill {
+  background: linear-gradient(90deg, #fbbf24, #fb923c) !important;
+}
+
+#nexus-composer-token-bar[data-tone="low"] .nx-tok-fill {
+  background: linear-gradient(90deg, #f43f5e, #f87171) !important;
+}
+
+#nexus-composer-token-bar .nx-tok-pct {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-weight: 700 !important;
+  font-size: 11.5px !important;
+  color: #6ee7b7 !important;
+}
+
+#nexus-composer-token-bar[data-tone="warn"] .nx-tok-pct {
+  color: #fcd34d !important;
+}
+
+#nexus-composer-token-bar[data-tone="low"] .nx-tok-pct {
+  color: #fda4af !important;
+}
+
+/* Keep Mermaid temporary measurement container off-screen (NEVER display:none, or getBBox() returns 0x0!) */
+body > div[id^="dmermaid-"] {
+  position: fixed !important;
+  left: -9999px !important;
+  top: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -9999 !important;
+}
+
+/* Suppress only actual Mermaid error bomb SVGs */
 svg[aria-roledescription="error"],
 svg.error-icon {
   display: none !important;
@@ -602,10 +718,7 @@ div[data-step-type="assistant_message"] .ai-message,
   max-width: 840px !important;
 }
 
-/* Hide Assistant Avatar (Both div and span wrappers in Chainlit 2.12) */
-div[data-step-type="assistant_message"] .ai-message > span:first-child,
-div[data-step-type="assistant_message"] .ai-message > div:first-child:has(img),
-div[data-step-type="assistant_message"] .ai-message > div:first-child:has(svg),
+/* Hide Assistant Avatar Only (Never target message body wrappers!) */
 div[data-step-type="assistant_message"] [class*="avatar"],
 .ai-message [class*="avatar"],
 .message-avatar,
@@ -2518,15 +2631,26 @@ body:has(#attach-category-popover) [data-state="delayed-open"] {
   justify-content: center !important;
   align-items: center !important;
   width: 100% !important;
+  min-height: 120px !important;
   overflow-x: auto !important;
-  padding: 12px 4px !important;
+  padding: 16px 8px !important;
+  background: rgba(15, 23, 42, 0.35) !important;
+  border-radius: 12px !important;
+  font-family: var(--font-sans) !important;
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+  letter-spacing: normal !important;
 }
 
 .nx-diagram-canvas svg {
   max-width: 100% !important;
+  width: auto !important;
   height: auto !important;
+  min-height: 80px !important;
+  max-height: 680px !important;
   overflow: visible !important;
   font-family: var(--font-sans) !important;
+  font-size: 14px !important;
 }
 
 .nx-diagram-canvas svg foreignObject {
@@ -4244,3 +4368,302 @@ html:not(.dark) body .step:not([data-step-type="user_message"]):not([data-step-t
   background: linear-gradient(135deg, rgba(99,102,241,0.07), rgba(6,182,212,0.05)) !important;
 }
 html:not(.dark) body .step > div:first-child { color: #0f172a !important; }
+
+
+/* ==========================================================================
+   nx-pro-polish — unified, professional layout (final override layer)
+   One centered column for messages, agent steps and composer; refined
+   typography, quiet controls, consistent radii and spacing.
+   ========================================================================== */
+:root { --nx-col: 760px; --nx-radius: 14px; --nx-accent: #6366f1; }
+
+/* Typography: clean sans UI, serif only for long-form answers */
+html, body, button, input, textarea { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important; }
+
+/* Single centered column */
+body .flex.flex-col.mx-auto.w-full.flex-grow.p-4,
+body #message-composer,
+body #restored-chat-stage {
+  max-width: var(--nx-col) !important;
+  width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+body div[data-step-type="user_message"],
+body div[data-step-type="assistant_message"],
+body .step:not([data-step-type="user_message"]):not([data-step-type="assistant_message"]),
+body div[data-step-type="run"],
+body div[data-step-type="tool"] {
+  max-width: 100% !important;
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* User message: compact right-aligned pill, sans-serif */
+body div[data-step-type="user_message"] [data-testid="user-message"],
+body div[data-step-type="user_message"] .ai-message,
+body div[data-step-type="user_message"] .message-content,
+body .user-message {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif !important;
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
+  border-radius: 18px !important;
+  padding: 10px 16px !important;
+  max-width: 78% !important;
+  box-shadow: none !important;
+}
+
+/* Hide the stray avatar dot beside agent steps / answers */
+body .step .ai-message > span,
+body .ai-message > span.rounded-full,
+body .ai-message > span[class*="shrink-0"] { display: none !important; }
+body .step .ai-message { gap: 0 !important; }
+
+/* Agent pipeline card: calm, flat, full column width */
+body .step:not([data-step-type="user_message"]):not([data-step-type="assistant_message"]) {
+  background: rgba(255,255,255,0.03) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: var(--nx-radius) !important;
+  box-shadow: none !important;
+  padding: 10px 14px !important;
+  margin: 12px 0 !important;
+}
+html:not(.dark) body .step:not([data-step-type="user_message"]):not([data-step-type="assistant_message"]) {
+  background: #ffffff !important;
+  border-color: rgba(15,23,42,0.1) !important;
+}
+body .step .step { border-left-width: 2px !important; background: transparent !important; }
+
+/* Assistant answer: readable measure, quiet headings */
+body .message-content { max-width: 100% !important; }
+body .message-content h1, body .message-content h2, body .message-content h3 {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif !important;
+  letter-spacing: -0.02em !important;
+}
+body .message-content h2 { border-bottom: 1px solid rgba(128,128,128,0.2) !important; padding-bottom: 6px !important; }
+body .message-content table { font-size: 0.9rem !important; }
+
+/* Composer: aligned with column, subtle elevation, neutral focus ring */
+body #message-composer {
+  border-radius: 20px !important;
+  margin-bottom: 8px !important;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.18) !important;
+}
+body #message-composer:focus-within {
+  border-color: rgba(99,102,241,0.55) !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15), 0 6px 24px rgba(0,0,0,0.2) !important;
+}
+
+/* Controls: quiet icons; send/stop = single accent color */
+body #voice-assistant-mic-btn,
+body #search-history-trigger-btn,
+body #apple-spotlight-trigger-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #94a3b8 !important;
+}
+body #voice-assistant-mic-btn:hover,
+body #search-history-trigger-btn:hover,
+body #apple-spotlight-trigger-btn:hover {
+  background: rgba(128,128,128,0.14) !important;
+  color: inherit !important;
+}
+body button[id*="submit"], body button[type="submit"], body #chat-submit, body #stop-button {
+  background: var(--nx-accent) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+body button[id*="submit"]:hover, body button[type="submit"]:hover { background: #4f46e5 !important; }
+
+/* Header: unified, no stray highlighted boxes */
+body header a, body header button {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+body header a:hover, body header button:hover { background: rgba(128,128,128,0.14) !important; }
+body #header-toggle-history-sidebar {
+  border: 1px solid rgba(128,128,128,0.25) !important;
+  border-radius: 8px !important;
+}
+
+/* Scrollbars & selection */
+* { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,0.35) transparent; }
+::selection { background: rgba(99,102,241,0.3) !important; }
+
+/* nx-pro-polish v2 — compact user bubble: ONE padded surface, no stacked padding */
+body div[data-step-type="user_message"] [data-testid="user-message"],
+body div[data-step-type="user_message"] .user-message,
+body div[data-step-type="user_message"] .ai-message,
+body div[data-step-type="user_message"] .message-content *,
+body div[data-step-type="user_message"] > div,
+body div[data-step-type="user_message"] > div > div {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  max-width: 100% !important;
+}
+body div[data-step-type="user_message"] .message-content {
+  display: inline-block !important;
+  width: fit-content !important;
+  max-width: 78% !important;
+  align-self: flex-end !important;
+  background: #2b2b29 !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 18px !important;
+  padding: 8px 16px !important;
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
+  color: #ececec !important;
+}
+html:not(.dark) body div[data-step-type="user_message"] .message-content {
+  background: #f0efe9 !important;
+  border-color: rgba(0,0,0,0.06) !important;
+  color: #1f1e1d !important;
+}
+body div[data-step-type="user_message"] .message-content p {
+  margin: 0 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif !important;
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
+  color: inherit !important;
+}
+body div[data-step-type="user_message"] { padding: 0 !important; margin: 14px 0 6px !important; }
+
+
+/* ==========================================================================
+   nx-premium — refined dark/light "ink & indigo" design system (final layer)
+   ========================================================================== */
+:root {
+  --nx-ink-0: #0a0b0f; --nx-ink-1: #101218; --nx-ink-2: #171a22; --nx-ink-3: #1f232d;
+  --nx-line: rgba(255,255,255,0.07); --nx-line-strong: rgba(255,255,255,0.13);
+  --nx-text: #eceef3; --nx-text-dim: #9aa1b2;
+  --nx-grad: linear-gradient(135deg, #7c83ff 0%, #6366f1 45%, #8b5cf6 100%);
+}
+
+/* Canvas: deep ink with a faint top glow */
+.dark body, body.dark {
+  background-color: var(--nx-ink-0) !important;
+  background-image:
+    radial-gradient(900px 420px at 50% -120px, rgba(99,102,241,0.14), transparent 70%) !important;
+  background-attachment: fixed !important;
+  color: var(--nx-text) !important;
+}
+html:not(.dark) body {
+  background-color: #f7f7fb !important;
+  background-image: radial-gradient(900px 420px at 50% -120px, rgba(99,102,241,0.10), transparent 70%) !important;
+  background-attachment: fixed !important;
+}
+
+/* Header: frosted, hairline divider */
+body header {
+  background: rgba(10,11,15,0.72) !important;
+  backdrop-filter: blur(16px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
+  border-bottom: 1px solid var(--nx-line) !important;
+  height: 54px !important;
+}
+html:not(.dark) body header { background: rgba(247,247,251,0.8) !important; border-bottom-color: rgba(15,23,42,0.08) !important; }
+body header a[href*="github"], body header a[href*="github"] * {
+  background: transparent !important; border: none !important; box-shadow: none !important;
+}
+body #header-toggle-history-sidebar {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid var(--nx-line-strong) !important;
+  border-radius: 10px !important;
+  height: 32px !important;
+  color: var(--nx-text-dim) !important;
+}
+body .header-history-counter {
+  background: var(--nx-grad) !important; color: #fff !important; border-radius: 999px !important;
+}
+
+/* Typography: one refined sans for everything */
+body .message-content, body .message-content p, body .message-content li {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-size: 0.97rem !important;
+  line-height: 1.72 !important;
+  letter-spacing: -0.006em !important;
+  color: var(--nx-text) !important;
+}
+html:not(.dark) body .message-content, html:not(.dark) body .message-content p, html:not(.dark) body .message-content li { color: #1b1e27 !important; }
+body .message-content p { margin: 0 0 1em !important; }
+body .message-content > *:last-child { margin-bottom: 0 !important; }
+body .message-content h1 { font-size: 1.55rem !important; font-weight: 700 !important; }
+body .message-content h2 { font-size: 1.2rem !important; font-weight: 650 !important; color: inherit !important; border-bottom: 1px solid var(--nx-line) !important; }
+body .message-content h3 { font-size: 1.04rem !important; font-weight: 650 !important; color: inherit !important; }
+body .message-content a { color: #a5b4fc !important; text-decoration: none !important; border-bottom: 1px solid rgba(165,180,252,0.35) !important; background: transparent !important; border-radius: 0 !important; padding: 0 !important; }
+body .message-content a:hover { color: #c7d2fe !important; border-bottom-color: #c7d2fe !important; }
+body .message-content code:not(pre code) { background: rgba(255,255,255,0.07) !important; border-radius: 6px !important; padding: 1px 6px !important; font-size: 0.86em !important; }
+body .message-content pre { background: var(--nx-ink-2) !important; border: 1px solid var(--nx-line) !important; border-radius: 12px !important; }
+body .message-content blockquote { border-left: 3px solid #6366f1 !important; background: rgba(99,102,241,0.07) !important; border-radius: 0 10px 10px 0 !important; }
+body .message-content table { border: 1px solid var(--nx-line) !important; border-radius: 12px !important; overflow: hidden !important; }
+body .message-content th { background: var(--nx-ink-2) !important; }
+
+/* User bubble: tight, premium */
+body div[data-step-type="user_message"] .message-content {
+  background: linear-gradient(135deg, #272a38, #1f222d) !important;
+  border: 1px solid var(--nx-line-strong) !important;
+  border-radius: 16px 16px 4px 16px !important;
+  padding: 7px 14px !important;
+  min-height: 0 !important;
+  height: auto !important;
+  line-height: 1.45 !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25) !important;
+}
+body div[data-step-type="user_message"] .message-content p { line-height: 1.45 !important; margin: 0 !important; }
+body div[data-step-type="user_message"].step, body .step[data-step-type="user_message"] { padding-top: 0 !important; padding-bottom: 0 !important; }
+html:not(.dark) body div[data-step-type="user_message"] .message-content { background: #ffffff !important; border-color: rgba(15,23,42,0.1) !important; box-shadow: 0 1px 6px rgba(15,23,42,0.08) !important; }
+
+/* Entrance animation for new messages */
+@keyframes nx-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+body div[data-step-type="user_message"], body div[data-step-type="assistant_message"] { animation: nx-rise 0.32s cubic-bezier(0.16,1,0.3,1) both; }
+
+/* Agent pipeline card */
+body .step:not([data-step-type="user_message"]):not([data-step-type="assistant_message"]) {
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015)) !important;
+  border: 1px solid var(--nx-line) !important;
+  border-radius: 14px !important;
+}
+
+/* Composer: glass dock with gradient focus */
+body #message-composer {
+  background: rgba(23,26,34,0.82) !important;
+  backdrop-filter: blur(18px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%) !important;
+  border: 1px solid var(--nx-line-strong) !important;
+  border-radius: 22px !important;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04) !important;
+}
+html:not(.dark) body #message-composer { background: rgba(255,255,255,0.9) !important; border-color: rgba(15,23,42,0.12) !important; box-shadow: 0 10px 32px rgba(15,23,42,0.1) !important; }
+body #message-composer:focus-within { border-color: rgba(129,140,248,0.6) !important; box-shadow: 0 0 0 3px rgba(99,102,241,0.18), 0 10px 40px rgba(0,0,0,0.5) !important; }
+body #message-composer textarea::placeholder { color: var(--nx-text-dim) !important; }
+
+/* Send / stop: gradient orb */
+body button[id*="submit"], body button[type="submit"], body #chat-submit, body #stop-button {
+  background: var(--nx-grad) !important;
+  box-shadow: 0 4px 14px rgba(99,102,241,0.4) !important;
+}
+body button[id*="submit"]:hover, body button[type="submit"]:hover { filter: brightness(1.1); transform: translateY(-1px) !important; background: var(--nx-grad) !important; }
+body button[id*="submit"]:disabled, body button[type="submit"]:disabled { background: var(--nx-ink-3) !important; box-shadow: none !important; opacity: 0.6 !important; }
+
+/* Quiet monochrome tool icons (mic no longer red) */
+body #voice-assistant-mic-btn { color: var(--nx-text-dim) !important; background: transparent !important; border-color: transparent !important; }
+body #voice-assistant-mic-btn:hover { color: var(--nx-text) !important; background: rgba(255,255,255,0.08) !important; }
+
+/* Message action icons + scroll button */
+body .message-content ~ div button, body div[class*="-ml-1.5"] button { color: var(--nx-text-dim) !important; opacity: 0.7; }
+body div[class*="-ml-1.5"] button:hover { opacity: 1; color: var(--nx-text) !important; }
+body button.rounded-full.border { background: var(--nx-ink-2) !important; border: 1px solid var(--nx-line-strong) !important; box-shadow: 0 4px 16px rgba(0,0,0,0.35) !important; }
+
+/* History sidebar: align with new palette */
+body #active-chat-history-sidebar { background: var(--nx-ink-1) !important; border-right: 1px solid var(--nx-line) !important; }
+body .active-sidebar-new-btn { background: var(--nx-grad) !important; border: none !important; box-shadow: 0 6px 18px rgba(99,102,241,0.3) !important; }
+body .active-sidebar-item { border-radius: 12px !important; }

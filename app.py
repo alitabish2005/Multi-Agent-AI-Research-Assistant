@@ -11,11 +11,32 @@ from langgraph.checkpoint.memory import MemorySaver
 from src.graph import create_research_graph
 from src.utils.exporter import export_report_to_pdf
 from src.utils.document_loader import load_uploaded_documents
+from src.agents.llm_factory import (
+    get_token_telemetry_snapshot,
+    record_token_usage,
+    estimate_tokens_from_text,
+)
 
 load_dotenv()
 
 # Initialize LangGraph for fully autonomous, uninterrupted multi-agent research
 research_graph = create_research_graph()
+
+
+@fastapi_app.get("/api/tokens/status")
+@fastapi_app.get("/public/tokens-status.json")
+async def get_tokens_status():
+    """Returns live dynamic token telemetry across the multi-agent research pipeline."""
+    return JSONResponse(
+        get_token_telemetry_snapshot(),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+# Move custom API routes to the front of FastAPI router so Chainlit's SPA catch-all never intercepts them
+for _route in list(fastapi_app.router.routes):
+    if getattr(_route, "path", "") in ("/api/tokens/status", "/public/tokens-status.json", "/api/voice/transcribe"):
+        fastapi_app.router.routes.remove(_route)
+        fastapi_app.router.routes.insert(0, _route)
 
 # ─────────────────── Voice Assistant Speech-to-Text Fallback ───────────────────
 @fastapi_app.post("/api/voice/transcribe")
@@ -144,6 +165,9 @@ async def on_message(message: cl.Message):
                     
         if file_paths:
             uploaded_docs = load_uploaded_documents(file_paths)
+            doc_toks = sum(estimate_tokens_from_text(d.get("content", "")) for d in uploaded_docs)
+            if doc_toks > 0:
+                record_token_usage(doc_tokens=doc_toks)
             
     if uploaded_docs:
         doc_names = list({d.get("title", "").split("(")[0].replace("📙", "").replace("📄", "").replace("📘", "").replace("📗", "").strip() for d in uploaded_docs if d.get("title")})
